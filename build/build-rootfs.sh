@@ -209,5 +209,35 @@ cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/pixmaps/deposit-logo.
 cp "$REPO_ROOT/assets/deposit-turbo.svg" "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
 cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
 
+# --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
+# This is what makes "boot the OS" land on the Deposit OS desktop.
+chroot "$ROOTFS" /bin/bash -c '
+  set -e
+  systemctl set-default graphical.target 2>/dev/null || true
+  systemctl enable lightdm 2>/dev/null || true
+'
+mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
+cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-deposit-autologin.conf" <<EOF
+[Seat:*]
+autologin-user=$DEPOSIT_DEFAULT_USER
+autologin-user-timeout=0
+autologin-session=xfce
+EOF
+
+# Branded desktop wallpaper (XFCE) — show the Deposit logo on first boot.
+cat > "$XCONF/xfce4-desktop.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitor0" type="empty">
+        <property name="image-path" type="string" value="/usr/share/pixmaps/deposit-logo.svg"/>
+        <property name="image-style" type="int" value="5"/>
+      </property>
+    </property>
+  </property>
+</channel>
+EOF
+
 echo "[rootfs] done -> $ROOTFS"
 echo "[rootfs] next: build the kernel (./build/build-kernel.sh) then pack with: mlpds build"

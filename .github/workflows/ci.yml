@@ -192,3 +192,51 @@ jobs:
           name: tool-demo-screenshot
           path: /tmp/shots/demo.png
           if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # 6) Live boot — actually boot Deposit OS in QEMU and screenshot the boot
+  #    screen, the GUI, and a terminal running the AQA installer.
+  # --------------------------------------------------------------------------
+  live-boot:
+    name: live boot + screenshots
+    runs-on: ubuntu-24.04
+    needs: [build-kernel, build-rootfs]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: install qemu
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qemu-system-x86 python3
+      - uses: actions/download-artifact@v4
+        with:
+          name: deposit-kernel
+          path: build/output
+      - uses: actions/download-artifact@v4
+        with:
+          name: deposit-rootfs
+          path: build/output
+      - name: extract artifacts
+        run: |
+          sudo tar -xf build/output/kernel.tar -C build/output
+          sudo tar -xf build/output/rootfs.tar -C build/output
+      - name: build disk + boot + screenshot
+        run: bash ci/live-boot.sh
+      - name: publish screenshots to job summary
+        if: always()
+        run: |
+          echo "### Deposit OS — live boot (boot screen, GUI, AQA terminal)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          for p in /tmp/shots/live-*.png; do
+            [ -s "$p" ] || continue
+            echo "![live $(basename "$p")](data:image/png;base64,$(base64 -w0 "$p"))" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-boot-screenshots
+          path: /tmp/shots/live-*.png
+          if-no-files-found: warn
