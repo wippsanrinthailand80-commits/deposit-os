@@ -120,6 +120,28 @@ chroot "$ROOTFS" /bin/bash -c '
   usermod -aG sudo '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true
 '
 
+# --- Stage 6: Deposit OS tooling (aqa installer + turbo engine) ------------
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+mkdir -p "$ROOTFS/usr/local/bin" "$ROOTFS/etc/deposit"
+cp "$REPO_ROOT/tools/aqa"        "$ROOTFS/usr/local/bin/aqa"
+cp "$REPO_ROOT/tools/deposit-turbo" "$ROOTFS/usr/local/bin/deposit-turbo"
+chmod +x "$ROOTFS/usr/local/bin/aqa" "$ROOTFS/usr/local/bin/deposit-turbo"
+
+# Default turbo config (hotkey is configurable here).
+cat > "$ROOTFS/etc/deposit/turbo.conf" <<EOF
+# Deposit Turbo configuration
+# HOTKEY is the global shortcut that toggles turbo. Change to e.g. "<Super>K".
+HOTKEY="Alt+K"
+EOF
+
+# Default AQA app registry (override by editing this file on the installed OS).
+cat > "$ROOTFS/etc/deposit/aqa.apps" <<EOF
+# name|type|url   — add your own lines. Stream has no fixed public URL; set
+# AQA_STREAM_URL in the environment, or replace __STREAM_URL__ below.
+chrome|deb|https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+stream|deb|__STREAM_URL__
+EOF
+
 umount_chroot
 trap - EXIT
 

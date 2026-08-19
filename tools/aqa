@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# ============================================================================
+# aqa — Deposit OS installer / package fetcher
+# ----------------------------------------------------------------------------
+#   aqa install <url>        scan a URL for .deb / .mlpds files and install them
+#                              e.g.  aqa install http://example.com/builds/
+#   aqa install <app|turbo>   install a known app (chrome, stream) or the
+#                             optional turbo GUI applet (aqa install turbo)
+#   aqa list                  show installable apps
+#   aqa help                  this message
+#
+# "aqa install http://example.com" is meant to be typed in a real terminal on a
+# physically-installed Deposit OS. It downloads, finds compatible .deb/.mlpds
+# files, and installs them immediately.
+#
+# Options:
+#   --dry-run   show what would happen, download/install nothing
+#   --type deb|mlpds   restrict the scan to one file type
+# ============================================================================
+set -uo pipefail
+
+VERSION="0.1"
+REPO_RAW="https://raw.githubusercontent.com/wippsanrinthailand80-commits/deposit-os/main"
+APPS_CONF="/etc/deposit/aqa.apps"
+
+# Default app registry (overridable via $APPS_CONF). Format: name|type|url
+# "stream" has no fixed public URL — set AQA_STREAM_URL (or add a line in
+# $APPS_CONF) to point it at your Stream build.
+DEFAULT_APPS=$(cat <<'EOF'
+chrome|deb|https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+stream|deb|__STREAM_URL__
+EOF
+)
+
+SUDO=""; [[ "$(id -u)" -eq 0 ]] || SUDO="sudo"
+DRYRUN=0
+RESTRICT=""
+
+log(){ echo "aqa: $*"; }
+die(){ echo "aqa: $*" >&2; exit 1; }
+
+# pick a downloader
+if command -v curl >/dev/null 2>&1; then DL="curl -fsSL"; elif command -v wget >/dev/null 2>&1; then DL="wget -qO-"; else die "need curl or wget"; fi
+
+fetch(){ # fetch URL -> stdout
+  case "$DL" in
+    curl*) curl -fsSL "$1" ;;
+    wget*) wget -qO- "$1" ;;
+  esac
+}
+download(){ # URL -> file
+  local url="$1" out="$2"
+  case "$DL" in
+    curl*) curl -fsSL "$url" -o "$out" ;;
+    wget*) wget -q "$url" -O "$out" ;;
+  esac
+}
+
+app_list(){
+  if [[ -f "$APPS_CONF" ]]; then cat "$APPS_CONF"; else echo "$DEFAULT_APPS"; fi
+}
+app_url(){
+  local name="$1" line url
+  line="$(app_list | grep -E "^${name}\|")"
+  [[ -z "$line" ]] && return 1
+  url="$(echo "$line" | cut -d'|' -f3)"
+  # allow env override
+  [[ "$name" == "stream" && -n "${AQA_STREAM_URL:-}" ]] && url="$AQA_STREAM_URL"
+  echo "$url"
+}
+
+install_deb(){
+  local f="$1"
+  if (( DRYRUN )); then log "[dry-run] would install deb: $f"; return 0; fi
+  $SUDO apt-get install -y "$f" 2>/dev/null || $SUDO dpkg -i "$f" && $SUDO apt-get install -f -y
+}
+install_mlpds(){
+  local f="$1"
+  if (( DRYRUN )); then log "[dry-run] would install mlpds: $f"; return 0; fi
+  command -v mlpds >/dev/null 2>&1 || die "mlpds not found in PATH"
+  $SUDO mlpds install "$f" --target /
+}
+
+# --- scan a URL for .deb/.mlpds and install --------------------------------
+scan_url(){
+  local url="$1" html links tmp f
+  log "scanning $url"
+  html="$(fetch "$url")" || die "could not fetch $url"
+  links="$(echo "$html" | grep -oE 'href="[^"]+\.(deb|mlpds)"' | sed -E 's/href="([^"]+)"/\1/' | sort -u)"
+  [[ -z "$links" ]] && { log "no .deb/.mlpds links found at $url"; return 0; }
+  tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
+  for rel in $links; do
+    case "$rel" in
+      http*|/*) f="$rel" ;;
+      *) f="$(dirname "$url")/$rel" ;;
+    esac
+    [[ -n "$RESTRICT" && "$f" != *.$RESTRICT ]] && continue
+    log "found: $f"
+    if (( DRYRUN )); then log "[dry-run] would fetch+install $f"; continue; fi
+    out="$tmp/$(basename "$f")"
+    download "$f" "$out" || { log "download failed: $f"; continue; }
+    case "$out" in
+      *.deb)  install_deb "$out" ;;
+      *.mlpds) install_mlpds "$out" ;;
+    esac
+  done
+}
+
+# --- install a known app / the turbo component -----------------------------
+install_app(){
+  local name="$1"
+  case "$name" in
+    turbo)
+      install_turbo ;;
+    chrome|stream)
+      local url; url="$(app_url "$name")" || die "unknown app: $name"
+      [[ "$url" == "__STREAM_URL__" || -z "$url" ]] && \
+        die "no URL configured for '$name' (set AQA_STREAM_URL or add a line to $APPS_CONF)"
+      if (( DRYRUN )); then log "[dry-run] would install $name from $url"; return 0; fi
+      local tmp; tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
+      local out="$tmp/$(basename "$url")"
+      log "downloading $name ..."
+      download "$url" "$out" || die "download failed: $url"
+      install_deb "$out"
+      ;;
+    *) die "unknown app: $name (try: $(app_list | cut -d'|' -f1 | paste -sd' '))" ;;
+  esac
+}
+
+# The turbo GUI applet is an optional component (keeps the base image light).
+install_turbo(){
+  if (( DRYRUN )); then
+    log "[dry-run] would install turbo applet from $REPO_RAW/components/turbo"
+    return 0
+  fi
+  local tmp; tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
+  cd "$tmp"
+  for f in deposit-tray.py install.sh deposit-turbo.desktop; do
+    download "$REPO_RAW/components/turbo/$f" "$f" || die "could not fetch turbo component: $f"
+  done
+  $SUDO bash install.sh
+}
+
+usage(){
+  sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# --- arg parsing -----------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRYRUN=1; shift ;;
+    --type)    RESTRICT="${2#.}"; shift 2 ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+set -- "${ARGS[@]:-}"
+
+[[ $# -eq 0 ]] && { usage; exit 1; }
+case "$1" in
+  install)
+    shift
+    [[ $# -eq 0 ]] && die "install needs an app name (chrome|stream|turbo) or a URL"
+    if [[ "$1" == *://* || "$1" == http* || "$1" == ftp* ]]; then
+      scan_url "$1"
+    else
+      install_app "$1"
+    fi
+    ;;
+  list)    app_list | sed 's/|/  ->  /g' ;;
+  help)    usage ;;
+  http*|ftp*|file*|*/|*.html|*.php|*.com|*.net|*.org)
+           scan_url "$1" ;;
+  *://*)   scan_url "$1" ;;
+  *)       die "unknown argument: $1 (try: aqa help)" ;;
+esac

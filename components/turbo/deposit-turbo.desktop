@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Deposit Turbo
+Comment=CPU/GPU turbo toggle tray applet
+Exec=deposit-tray
+Terminal=false
+X-GNOME-Autostart-OnlyShowIn=XFCE;
+Autostart=true

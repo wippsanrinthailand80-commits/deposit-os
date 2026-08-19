@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# ============================================================================
+# deposit-turbo — maximize CPU/GPU performance ("turbo") or return to normal.
+# ----------------------------------------------------------------------------
+#   deposit-turbo on|off|toggle|status|hotkey
+#
+# CPU: switches the cpufreq scaling governor (performance <-> powersave).
+# GPU: best-effort, hardware-specific power profile (AMD DPM "high"/"auto",
+#      NVIDIA PowerMizer). On hardware without a controllable profile this is
+#      a no-op (it never errors).
+#
+# State is written to /var/lib/deposit-turbo/state so the GUI applet and the
+# Alt+K shortcut stay in sync.
+# ============================================================================
+set -uo pipefail
+
+STATE_DIR="/var/lib/deposit-turbo"
+STATE="$STATE_DIR/state"
+CONF="/etc/deposit/turbo.conf"
+HOTKEY="Alt+K"
+[[ -f "$CONF" ]] && source "$CONF"
+
+log(){ echo "deposit-turbo: $*"; }
+
+cpu_set(){
+  local gov="$1" f
+  for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
+    [[ -w "$f" ]] && echo "$gov" > "$f" 2>/dev/null || true
+  done
+  # also disable/enable Intel/AMD idle states best-effort
+  for f in /sys/devices/system/cpu/cpu[0-9]*/cpuidle/state[2-9]/disable; do
+    [[ -w "$f" ]] && echo "$2" > "$f" 2>/dev/null || true
+  done
+}
+
+gpu_set(){
+  local mode="$1" f
+  # AMD: /sys/class/drm/card*/device/power_dpm_force_performance_level
+  for f in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
+    [[ -w "$f" ]] && echo "$mode" > "$f" 2>/dev/null || true
+  done
+  # NVIDIA: PowerMizer (1=max performance, 0=auto)
+  if command -v nvidia-settings >/dev/null 2>&1; then
+    case "$mode" in
+      high) nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=1' >/dev/null 2>&1 || true ;;
+      auto) nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=0' >/dev/null 2>&1 || true ;;
+    esac
+  fi
+}
+
+on(){
+  mkdir -p "$STATE_DIR"
+  cpu_set performance 0
+  gpu_set high
+  echo on > "$STATE"
+  log "ON  (CPU=performance, GPU=high)"
+}
+
+off(){
+  mkdir -p "$STATE_DIR"
+  cpu_set powersave 1
+  gpu_set auto
+  echo off > "$STATE"
+  log "OFF (normal mode)"
+}
+
+status(){
+  local s="off"; [[ -f "$STATE" ]] && s="$(cat "$STATE")"
+  local g="unknown"
+  [[ -r /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]] && \
+    g="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)"
+  echo "turbo: $s"
+  echo "cpu governor: $g"
+  echo "hotkey: $HOTKEY"
+}
+
+toggle(){
+  if [[ "$(cat "$STATE" 2>/dev/null)" == "on" ]]; then off; else on; fi
+}
+
+case "${1:-status}" in
+  on|enable)  on ;;
+  off|disable) off ;;
+  toggle)     toggle ;;
+  status)     status ;;
+  hotkey)     echo "$HOTKEY" ;;
+  *) echo "usage: deposit-turbo [on|off|toggle|status|hotkey]"; exit 2 ;;
+esac

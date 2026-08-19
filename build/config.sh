@@ -39,7 +39,7 @@ DEPOSIT_COMPONENTS="${DEPOSIT_COMPONENTS:-main,universe}"
 # Minimal, apt-capable base. debootstrap --variant=minbase already pulls the
 # essential toolchain; these are added on top.
 DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
-  gnupg netplan.io systemd systemd-sysv udev openssh-server vim-tiny}"
+  gnupg netplan.io systemd systemd-sysv udev openssh-server vim-tiny curl}"
 
 # Optional lightweight desktop (XFCE). Leave empty for a headless/CLI build.
 DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm}"

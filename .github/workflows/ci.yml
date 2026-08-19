@@ -31,6 +31,10 @@ jobs:
           shellcheck -S error tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh
       - name: run mlpds tests
         run: sudo bash tests/test_mlpds.sh
+      - name: compile-check turbo tray (python)
+        run: python3 -m py_compile tools/mlpds-installer/installer/install.sh components/turbo/deposit-tray.py 2>/dev/null || python3 -m py_compile components/turbo/deposit-tray.py
+      - name: run aqa + turbo tests
+        run: sudo bash tests/test_aqa.sh
 
   # --------------------------------------------------------------------------
   # 2) Compile the Linux kernel from upstream source (truly "from the kernel").

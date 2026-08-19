@@ -67,6 +67,55 @@ sudo bash tools/mlpds install deposit.os.mlpds --target /mnt/sda1 --boot
 Other `mlpds` commands: `info`, `extract`, `launch` (QEMU), `build-kernel`,
 `build-rootfs`.
 
+## Installer & apps — `aqa`
+
+`aqa` is the Deposit OS installer you run from a **real terminal on a physically
+installed Deposit OS** (it ships in `/usr/local/bin`, baked into the image). It
+finds and installs compatible packages from anywhere:
+
+```bash
+# Scan a URL for .deb / .mlpds files and install them immediately
+aqa install http://example.com/builds/
+
+# Install a known app (Chrome + Stream are bundled by default)
+aqa install chrome
+aqa install stream          # needs a URL: set AQA_STREAM_URL or edit /etc/deposit/aqa.apps
+
+# Install the optional Turbo GUI applet (see below)
+aqa install turbo
+
+aqa list                   # show installable apps
+aqa install chrome --dry-run
+```
+
+- `.deb` files → installed via `apt`/`dpkg`.
+- `.mlpds` files → installed via `mlpds install`.
+- A URL can be passed directly to `install` (`aqa install http://...`), or as a
+  bare argument (`aqa http://...`) — both scan for `.deb`/`.mlpds`.
+- App registry lives at `/etc/deposit/aqa.apps` (`name|type|url`); "Stream" has
+  no fixed public URL, so set `AQA_STREAM_URL` or edit that file.
+
+## Turbo mode (CPU / GPU)
+
+`deposit-turbo` maximizes performance on demand:
+
+```bash
+deposit-turbo on      # CPU governor -> performance, GPU profile -> high
+deposit-turbo off     # back to normal (powersave / auto)
+deposit-turbo toggle  # flip
+deposit-turbo status  # current state + governor + hotkey
+```
+
+- **GPU** handling is best-effort and hardware-specific: AMD DPM
+  (`power_dpm_force_performance_level` = `high`/`auto`) and NVIDIA PowerMizer.
+  On hardware without a controllable profile it is a safe no-op.
+- **Hotkey**: `Alt+K` by default, configurable in `/etc/deposit/turbo.conf`
+  (`HOTKEY=...`). `aqa install turbo` also binds it in XFCE.
+- **GUI applet** (optional, keeps the base image light): `aqa install turbo`
+  drops a tray applet (`deposit-tray`) into the top-right. Click to toggle; when
+  you enable GPU speed a **spinning wheel appears and gradually fades away**, and
+  disabling it stops the spinner and returns to normal mode.
+
 ## Testing
 
 - **Fast / offline** (no network, no real compile): `sudo bash tests/test_mlpds.sh`
