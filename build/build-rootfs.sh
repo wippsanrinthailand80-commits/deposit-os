@@ -84,14 +84,16 @@ mount_chroot
 chroot "$ROOTFS" /bin/bash -c '
   set -e
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  apt-get install -y --no-install-recommends '"$DEPOSIT_EXTRA_BASE"'
+  export APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+  apt-get $APT_OPTS update -qq
+  apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_EXTRA_BASE"'
 '
 if [[ -n "${DEPOSIT_DESKTOP_PKGS:-}" ]]; then
   chroot "$ROOTFS" /bin/bash -c '
     set -e
     export DEBIAN_FRONTEND=noninteractive
-    apt-get install -y --no-install-recommends '"$DEPOSIT_DESKTOP_PKGS"'
+    export APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+    apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_DESKTOP_PKGS"'
   '
 fi
 
