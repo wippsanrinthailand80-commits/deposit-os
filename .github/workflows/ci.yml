@@ -48,11 +48,13 @@ jobs:
             build-essential bc flex bison libelf-dev libssl-dev wget xz-utils cpio kmod ccache
       - name: compile kernel
         run: sudo bash build/build-kernel.sh
+      - name: package kernel tarball
+        run: sudo tar -C build/output -cf build/output/kernel.tar kernel
       - name: upload kernel
         uses: actions/upload-artifact@v4
         with:
           name: deposit-kernel
-          path: build/output/kernel
+          path: build/output/kernel.tar
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
@@ -70,11 +72,15 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends debootstrap
       - name: build rootfs
         run: sudo bash build/build-rootfs.sh build/output/rootfs
+      - name: package rootfs tarball
+        # Upload as a single archive: raw rootfs trees contain /dev device nodes
+        # that upload-artifact cannot pack.
+        run: sudo tar -C build/output -cf build/output/rootfs.tar rootfs
       - name: upload rootfs
         uses: actions/upload-artifact@v4
         with:
           name: deposit-rootfs
-          path: build/output/rootfs
+          path: build/output/rootfs.tar
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
@@ -90,11 +96,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: deposit-kernel
-          path: build/output/kernel
+          path: build/output
       - uses: actions/download-artifact@v4
         with:
           name: deposit-rootfs
-          path: build/output/rootfs
+          path: build/output
+      - name: extract artifacts
+        run: |
+          sudo tar -xf build/output/kernel.tar -C build/output
+          sudo tar -xf build/output/rootfs.tar -C build/output
       - name: create .mlpds
         run: |
           sudo bash tools/mlpds create \
