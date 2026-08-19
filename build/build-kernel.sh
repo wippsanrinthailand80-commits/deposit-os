@@ -210,6 +210,9 @@ CONFIG_NLS_CODEPAGE_437=y
 CONFIG_NLS_UTF8=y
 CFG
 
+  # Append the broad hardware-support fragment (distro-class driver set).
+  cat "$SCRIPT_DIR/kernel-fragments/deposit-broad.cfg" >> .config
+
   echo "[kernel] olddefconfig"
   make "${MAKE_VARS[@]}" olddefconfig
 fi

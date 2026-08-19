@@ -156,7 +156,7 @@ JSON
 }
 JSON
 
-  tar -C "$tmp" -cf - --transform='s,^\./,,' --owner=0 --group=0 . | xz -c > "$out"
+  tar -C "$tmp" -cf - --transform='s,^\./,,' --owner=0 --group=0 . | xz -T0 -c > "$out"
   log "created $out  (type=$type, rootfs=$rkind, $(du -h "$out" | cut -f1))"
 }
 

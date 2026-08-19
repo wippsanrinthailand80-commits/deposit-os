@@ -28,7 +28,7 @@ DEPOSIT_ARCH="${DEPOSIT_ARCH:-$(uname -m)}"
 # --- Kernel (compiled from upstream source, NOT from any distro) ------------
 DEPOSIT_KERNEL_VERSION="${DEPOSIT_KERNEL_VERSION:-6.6.58}"   # LTS, good on old HW
 DEPOSIT_KERNEL_URL="${DEPOSIT_KERNEL_URL:-https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${DEPOSIT_KERNEL_VERSION}.tar.xz}"
-DEPOSIT_KERNEL_TINY="${DEPOSIT_KERNEL_TINY:-1}"             # start from tinyconfig
+DEPOSIT_KERNEL_TINY="${DEPOSIT_KERNEL_TINY:-0}"             # 0 = defconfig (broad), 1 = tinyconfig
 # Build parallelism. Lower = less RAM, slower build. Default: all host cores.
 DEPOSIT_KERNEL_JOBS="${DEPOSIT_KERNEL_JOBS:-$(nproc)}"
 

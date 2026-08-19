@@ -42,7 +42,7 @@ jobs:
   build-kernel:
     name: build kernel from source
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - name: build deps
@@ -97,7 +97,7 @@ jobs:
     name: package .mlpds installer
     runs-on: ubuntu-24.04
     needs: [build-kernel, build-rootfs]
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
