@@ -11,17 +11,17 @@ permissions:
 
 jobs:
   # --------------------------------------------------------------------------
-  # 1) Tool + .mlpds unit tests — fast, no network.
+  # 1) Tool + .mlpds unit tests, plus a tool-demo screenshot. Fast, no network.
   # --------------------------------------------------------------------------
   tool-tests:
-    name: mlpds tool + scripts
+    name: mlpds tool + scripts + demo
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: syntax check
         run: |
-          for f in tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh tests/*.sh; do
+          for f in tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh tests/*.sh ci/*.sh; do
             bash -n "$f" || exit 1
           done
       - name: shellcheck
@@ -35,6 +35,33 @@ jobs:
         run: python3 -m py_compile tools/mlpds-installer/installer/install.sh components/turbo/deposit-tray.py 2>/dev/null || python3 -m py_compile components/turbo/deposit-tray.py
       - name: run aqa + turbo tests
         run: sudo bash tests/test_aqa.sh
+      - name: tool demo + screenshot
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
+          sudo apt-get install -y --no-install-recommends xvfb xterm scrot python3-pil fonts-dejavu
+          chmod +x tools/mlpds tools/aqa tools/deposit-turbo
+          mkdir -p /tmp/shots
+          xvfb-run -a bash -c 'xterm -geometry 120x44 -e "bash ci/demo.sh; echo; echo [capturing...]; sleep 3" & sleep 12; scrot -o /tmp/shots/demo_raw.png' || true
+          python3 ci/render_log.py /tmp/shots/demo.log /tmp/shots/demo.png "Deposit OS — tool demo (.mlpds + AQA)" 2>/tmp/shots/render.err \
+            || cp /tmp/shots/demo_raw.png /tmp/shots/demo.png 2>/dev/null \
+            || true
+          ls -l /tmp/shots/demo.png
+      - name: publish demo to job summary
+        run: |
+          echo "### Deposit OS — tool demo (.mlpds + AQA)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "![tool demo](data:image/png;base64,$(base64 -w0 /tmp/shots/demo.png))" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          sed 's/</\&lt;/g; s/>/\&gt;/g' /tmp/shots/demo.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: upload demo screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tool-demo-screenshot
+          path: /tmp/shots/demo.png
+          if-no-files-found: warn
 
   # --------------------------------------------------------------------------
   # 2) Compile the Linux kernel from upstream source (truly "from the kernel").
@@ -70,7 +97,7 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
-  # 3) Assemble the apt/.deb-compatible userspace (debootstrap).
+  # 3) Assemble the apt/.deb-compatible userspace (debootstrap + XFCE GUI).
   # --------------------------------------------------------------------------
   build-rootfs:
     name: assemble userspace (apt compatible)
@@ -96,15 +123,21 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
-  # 4) Package a real .mlpds install file from the built kernel + rootfs.
+  # 4) Package the .mlpds installer, THEN actually boot Deposit OS in QEMU and
+  #    screenshot the boot screen, the GUI, and a terminal running AQA.
   # --------------------------------------------------------------------------
-  package:
-    name: package .mlpds installer
+  package-and-live:
+    name: package .mlpds + live boot
     runs-on: ubuntu-24.04
     needs: [build-kernel, build-rootfs]
-    timeout-minutes: 40
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+      - name: install qemu + capture deps
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qemu-system-x86 python3 xvfb xterm scrot python3-pil fonts-dejavu
       - uses: actions/download-artifact@v4
         with:
           name: deposit-kernel
@@ -125,17 +158,8 @@ jobs:
             --out deposit.os.mlpds \
             --type os
           sudo bash tools/mlpds info deposit.os.mlpds
-      - name: upload .mlpds
-        uses: actions/upload-artifact@v4
-        with:
-          name: deposit-os-mlpds
-          path: deposit.os.mlpds
-          if-no-files-found: error
-
       - name: screenshot the built .mlpds (info)
         run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
-          sudo apt-get install -y --no-install-recommends xvfb xterm scrot python3-pil fonts-dejavu
           chmod +x tools/mlpds
           mkdir -p /tmp/os-shot
           xvfb-run -a bash -c 'xterm -geometry 100x40 -e bash ci/os-info.sh & sleep 10; scrot -o /tmp/os-shot/os_raw.png' || true
@@ -143,94 +167,15 @@ jobs:
             || cp /tmp/os-shot/os_raw.png /tmp/os-shot/os.png 2>/dev/null \
             || true
           ls -l /tmp/os-shot/os.png 2>/dev/null || echo "no png"
-      - name: publish built .mlpds screenshot
+      - name: build disk + boot + live screenshots
+        run: bash ci/live-boot.sh
+      - name: publish screenshots to job summary
         if: always()
         run: |
           echo "### Deposit OS — packaged .mlpds (info)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "![os mlpds](data:image/png;base64,$(base64 -w0 /tmp/os-shot/os.png))" >> "$GITHUB_STEP_SUMMARY"
-      - name: upload os screenshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: os-mlpds-screenshot
-          path: /tmp/os-shot/os.png
-          if-no-files-found: warn
-
-  # --------------------------------------------------------------------------
-  # 5) Tool demo + screenshot — shows .mlpds + AQA steps in the Actions tab.
-  # --------------------------------------------------------------------------
-  demo:
-    name: tool demo + screenshot
-    runs-on: ubuntu-24.04
-    needs: [tool-tests]
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: install capture deps
-        run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
-          sudo apt-get install -y --no-install-recommends xvfb xterm scrot python3-pil fonts-dejavu
-      - name: run demo + capture
-        run: |
-          chmod +x tools/mlpds tools/aqa tools/deposit-turbo
-          mkdir -p /tmp/shots
-          xvfb-run -a bash -c 'xterm -geometry 120x44 -e "bash ci/demo.sh; echo; echo [capturing...]; sleep 3" & sleep 12; scrot -o /tmp/shots/demo_raw.png' || true
-          # clean, content-sized render of the log (legible in the Summary tab)
-          python3 ci/render_log.py /tmp/shots/demo.log /tmp/shots/demo.png "Deposit OS — tool demo (.mlpds + AQA)" 2>/tmp/shots/render.err \
-            || cp /tmp/shots/demo_raw.png /tmp/shots/demo.png 2>/dev/null \
-            || true
-          ls -l /tmp/shots/demo.png
-      - name: publish to job summary
-        run: |
-          echo "### Deposit OS — tool demo (.mlpds + AQA)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "![tool demo](data:image/png;base64,$(base64 -w0 /tmp/shots/demo.png))" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          sed 's/</\&lt;/g; s/>/\&gt;/g' /tmp/shots/demo.log >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - name: upload screenshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tool-demo-screenshot
-          path: /tmp/shots/demo.png
-          if-no-files-found: warn
-
-  # --------------------------------------------------------------------------
-  # 6) Live boot — actually boot Deposit OS in QEMU and screenshot the boot
-  #    screen, the GUI, and a terminal running the AQA installer.
-  # --------------------------------------------------------------------------
-  live-boot:
-    name: live boot + screenshots
-    runs-on: ubuntu-24.04
-    needs: [build-kernel, build-rootfs]
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-      - name: install qemu
-        run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            qemu-system-x86 python3
-      - uses: actions/download-artifact@v4
-        with:
-          name: deposit-kernel
-          path: build/output
-      - uses: actions/download-artifact@v4
-        with:
-          name: deposit-rootfs
-          path: build/output
-      - name: extract artifacts
-        run: |
-          sudo tar -xf build/output/kernel.tar -C build/output
-          sudo tar -xf build/output/rootfs.tar -C build/output
-      - name: build disk + boot + screenshot
-        run: bash ci/live-boot.sh
-      - name: publish screenshots to job summary
-        if: always()
-        run: |
           echo "### Deposit OS — live boot (boot screen, GUI, AQA terminal)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           for p in /tmp/shots/live-*.png; do
@@ -242,6 +187,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: live-boot-screenshots
-          path: /tmp/shots/live-*.png
+          name: os-and-live-screenshots
+          path: |
+            /tmp/os-shot/os.png
+            /tmp/shots/live-*.png
           if-no-files-found: warn
