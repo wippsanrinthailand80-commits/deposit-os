@@ -115,9 +115,10 @@ if (( MENU )); then
 fi
 
 # --- Build ------------------------------------------------------------------
-NPROC="$(nproc)"
-echo "[kernel] building with -j$NPROC"
-make "${MAKE_VARS[@]}" -j"$NPROC"
+# Parallelism is capped by DEPOSIT_KERNEL_JOBS (default: all cores).
+# Lower it (e.g. 1) to trade build time for a smaller RAM spike.
+echo "[kernel] building with -j$DEPOSIT_KERNEL_JOBS (lower = less RAM, slower)"
+make "${MAKE_VARS[@]}" -j"$DEPOSIT_KERNEL_JOBS"
 
 # --- Install artefacts -------------------------------------------------------
 mkdir -p "$KOUT/boot"
