@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Deposit OS quick menu — small floating control panel pinned bottom-right.
+
+Test version. Provides Wi-Fi, screen-brightness and airplane-mode toggles, a
+security status section (ClamAV / firewall / AppArmor) with a one-click AV
+scan, and an ARM build notice (ARM is not yet supported). It auto-starts in
+the XFCE session and can also be launched from a terminal as
+`deposit-quickmenu`.
+"""
+import subprocess
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk
+
+
+def run(cmd, timeout=15):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               timeout=timeout)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------
+# backends (best-effort; the panel degrades gracefully when a device/host
+# capability is missing — e.g. a VM has no real backlight or Wi-Fi radio)
+# --------------------------------------------------------------------------
+def wifi_on():
+    r = run("nmcli radio wifi 2>/dev/null")
+    return bool(r and r.stdout.strip().lower() == "enabled")
+
+
+def set_wifi(on):
+    run("nmcli radio wifi " + ("on" if on else "off"))
+
+
+def airplane_on():
+    r = run("rfkill list all 2>/dev/null")
+    return bool(r and "Soft blocked: yes" in r.stdout)
+
+
+def set_airplane(on):
+    if on:
+        run("rfkill block all")
+    else:
+        run("rfkill unblock all")
+
+
+def brightness_pct():
+    r = run("brightnessctl g 2>/dev/null")
+    if r and r.stdout.strip().isdigit():
+        m = run("brightnessctl m 2>/dev/null")
+        if m and m.stdout.strip().isdigit() and int(m.stdout.strip()):
+            return int(r.stdout.strip()) * 100 // int(m.stdout.strip())
+    return 50
+
+
+def set_brightness(pct):
+    if not 0 <= pct <= 100:
+        pct = 50
+    run("brightnessctl s %d%% 2>/dev/null" % pct)
+    # fallback: write every sysfs backlight directly
+    run("for f in /sys/class/backlight/*/brightness; do "
+        "echo $(( $(cat ${f%/*}/max_brightness) * %d / 100 )) > \"$f\"; done" % pct)
+
+
+def security_status():
+    lines = []
+    if subprocess.run("command -v clamscan >/dev/null 2>&1", shell=True).returncode == 0:
+        lines.append("ClamAV: installed")
+    else:
+        lines.append("ClamAV: not installed")
+    fw = run("ufw status 2>/dev/null | head -1")
+    lines.append("Firewall: " + (fw.stdout.strip() if fw else "unknown"))
+    aa = run("aa-status --enabled >/dev/null 2>&1 && echo on || echo off")
+    lines.append("AppArmor: " + (aa.stdout.strip() if aa else "unknown"))
+    return "\n".join(lines)
+
+
+class QuickMenu(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Deposit Quick")
+        self.set_default_size(264, 360)
+        self.set_keep_above(True)
+        self.set_skip_taskbar_hint(True)
+        self.connect("destroy", Gtk.main_quit)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(10)
+        self.add(box)
+
+        hdr = Gtk.Label()
+        hdr.set_markup("<b>Deposit OS — Quick</b>")
+        box.pack_start(hdr, False, False, 0)
+
+        self.wifi = Gtk.ToggleButton(label="Wi-Fi: on")
+        self.wifi.set_active(wifi_on())
+        self.wifi.connect("toggled", self.on_wifi)
+        box.pack_start(self.wifi, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        row.pack_start(Gtk.Label(label="Brightness"), False, False, 0)
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.scale.set_value(brightness_pct())
+        self.scale.set_size_request(140, -1)
+        self.scale.connect("value-changed", self.on_bright)
+        row.pack_start(self.scale, True, True, 0)
+        box.pack_start(row, False, False, 0)
+
+        self.air = Gtk.ToggleButton(label="Airplane mode: off")
+        self.air.set_active(airplane_on())
+        self.air.connect("toggled", self.on_air)
+        box.pack_start(self.air, False, False, 0)
+
+        box.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
+                       False, False, 0)
+        sec = Gtk.Label()
+        sec.set_markup("<b>Security</b>")
+        box.pack_start(sec, False, False, 0)
+        self.sec = Gtk.Label(label=security_status())
+        box.pack_start(self.sec, False, False, 0)
+        scan = Gtk.Button(label="Run AV scan")
+        scan.connect("clicked", self.on_scan)
+        box.pack_start(scan, False, False, 0)
+
+        arm = Gtk.Label()
+        arm.set_markup('<span size="small">ARM build: test only — not yet supported.</span>')
+        box.pack_start(arm, False, False, 0)
+
+        self.show_all()
+        self.move_bottom_right()
+
+    def move_bottom_right(self):
+        try:
+            mon = self.get_screen().get_monitor_geometry(0)
+            w, h = 264, 380
+            self.move(max(0, mon.width - w - 12), max(0, mon.height - h - 12))
+        except Exception:
+            self.move(980, 600)
+
+    def on_wifi(self, btn):
+        set_wifi(btn.get_active())
+        btn.set_label("Wi-Fi: " + ("on" if btn.get_active() else "off"))
+
+    def on_air(self, btn):
+        set_airplane(btn.get_active())
+        btn.set_label("Airplane mode: " + ("on" if btn.get_active() else "off"))
+
+    def on_bright(self, scale):
+        set_brightness(int(scale.get_value()))
+
+    def on_scan(self, btn):
+        btn.set_label("Scanning…")
+        r = run('deposit-av "$HOME" 2>&1 | tail -4', timeout=120)
+        out = (r.stdout.strip() if r and r.stdout else "scan complete")
+        self.sec.set_text(security_status() + "\n" + out)
+        btn.set_label("Run AV scan")
+
+
+if __name__ == "__main__":
+    try:
+        QuickMenu()
+        Gtk.main()
+    except Exception as e:
+        print("deposit-quickmenu:", e)

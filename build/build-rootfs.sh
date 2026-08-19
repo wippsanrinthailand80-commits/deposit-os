@@ -165,8 +165,34 @@ if [ "$DEPOSIT_ENABLE_THAI" = "1" ]; then
 fi
 EOF
 chmod +x "$ROOTFS/tmp/deposit-extra.sh"
-chroot "$ROOTFS" /tmp/deposit-extra.sh
-rm -f "$ROOTFS/tmp/deposit-extra.sh"
+  chroot "$ROOTFS" /tmp/deposit-extra.sh
+  rm -f "$ROOTFS/tmp/deposit-extra.sh"
+
+# --- Stage 5c: quick menu + virus scanner + OS security features ----------
+chroot "$ROOTFS" /bin/bash -c '
+  export DEBIAN_FRONTEND=noninteractive
+  export APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+  apt-get $APT_OPTS update -qq
+  apt-get $APT_OPTS install -y --no-install-recommends \
+    clamav clamav-freshclam apparmor apparmor-utils brightnessctl rfkill \
+    python3-gi gir1.2-gtk-3.0 wpasupplicant || echo "WARN: security install issue"
+'
+# Deposit tooling: bottom-right quick menu + AV wrapper (launchable in terminal).
+cp "$REPO_ROOT/tools/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu"
+cp "$REPO_ROOT/tools/deposit-av"        "$ROOTFS/usr/local/bin/deposit-av"
+chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-av"
+
+# Autostart the quick menu in the XFCE session.
+mkdir -p "$ROOTFS/etc/xdg/autostart"
+cat > "$ROOTFS/etc/xdg/autostart/deposit-quickmenu.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit Quick Menu
+Exec=deposit-quickmenu
+X-GNOME-Autostart-enabled=true
+EOF
+# Best-effort: enforce shipped AppArmor profiles (no-op if kernel lacks AA).
+chroot "$ROOTFS" /bin/bash -c 'aa-enforce /etc/apparmor.d/* 2>/dev/null || true'
 
 umount_chroot
 trap - EXIT

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# deposit-av — ClamAV scan wrapper for Deposit OS (test version).
+# Refreshes signatures then scans the given path (default: your home dir).
+#   deposit-av [PATH]
+set -u
+TARGET="${1:-$HOME}"
+echo "Deposit AV: refreshing signatures…"
+freshclam --quiet 2>/dev/null || echo "Deposit AV: (signature refresh skipped)"
+echo "Deposit AV: scanning $TARGET …"
+clamscan -r -i --no-summary "$TARGET" | tail -25
+echo "Deposit AV: done."
