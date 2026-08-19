@@ -50,8 +50,8 @@ DEPOSIT_THEME_PKGS="${DEPOSIT_THEME_PKGS:-materia-gtk-theme papirus-icon-theme \
 
 # --- Thai language support (fonts + locale). On by default. -----------------
 DEPOSIT_ENABLE_THAI="${DEPOSIT_ENABLE_THAI:-1}"
-DEPOSIT_THAI_FONTS="${DEPOSIT_THAI_FONTS:-fonts-thai-tlwg fonts-noto-cursive \
-  fonts-noto-color-emoji}"
+DEPOSIT_THAI_FONTS="${DEPOSIT_THAI_FONTS:-fonts-thai-tlwg fonts-noto-color-emoji \
+  fonts-noto-extra}"
 # Locales to generate in the image (Thai + English both present).
 DEPOSIT_LOCALES="${DEPOSIT_LOCALES:-en_US.UTF-8 th_TH.UTF-8}"
 

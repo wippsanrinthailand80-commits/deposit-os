@@ -145,19 +145,23 @@ EOF
 # --- Stage 5b: rounded theme, Thai language, curated apps/services ----------
 cat > "$ROOTFS/tmp/deposit-extra.sh" <<EOF
 #!/usr/bin/env bash
-set -e
+# Non-fatal: an unavailable optional package must not break the whole image.
 export DEBIAN_FRONTEND=noninteractive
 APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THEME_PKGS
-apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_APPS
-apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_SERVICES
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THEME_PKGS \
+  || echo "WARN: theme install issue"
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_APPS \
+  || echo "WARN: apps install issue"
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_SERVICES \
+  || echo "WARN: services install issue"
 if [ "$DEPOSIT_ENABLE_THAI" = "1" ]; then
-  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THAI_FONTS locales
+  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THAI_FONTS locales \
+    || echo "WARN: thai install issue"
   for L in $DEPOSIT_LOCALES; do
     sed -i "s|^#\? *\$L UTF-8|\$L UTF-8|" /etc/locale.gen
   done
-  locale-gen
-  update-locale LANG=$DEPOSIT_DEFAULT_LOCALE
+  locale-gen || echo "WARN: locale-gen issue"
+  update-locale LANG=$DEPOSIT_DEFAULT_LOCALE || true
 fi
 EOF
 chmod +x "$ROOTFS/tmp/deposit-extra.sh"
