@@ -45,6 +45,11 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+      - name: cache kernel build tree
+        uses: actions/cache@v4
+        with:
+          path: build/output/linux-6.6.58
+          key: kernel-${{ hashFiles('build/config.sh', 'build/build-kernel.sh', 'build/kernel-fragments/deposit-broad.cfg') }}
       - name: build deps
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
