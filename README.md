@@ -116,6 +116,41 @@ deposit-turbo status  # current state + governor + hotkey
   you enable GPU speed a **spinning wheel appears and gradually fades away**, and
   disabling it stops the spinner and returns to normal mode.
 
+## Localization — Thai
+
+Thai is a first-class language in Deposit OS (on by default):
+
+- **Fonts**: `fonts-thai-tlwg`, Noto (incl. emoji) are installed.
+- **Locale**: both `en_US.UTF-8` and `th_TH.UTF-8` are generated; the default
+  is English, and Thai is fully usable. Pick at install time with
+  `mlpds install --locale th_TH.UTF-8`, or set `DEPOSIT_DEFAULT_LOCALE` in
+  `build/config.sh` to make Thai the default.
+- Toggle in the build with `DEPOSIT_ENABLE_THAI=0`.
+
+## Look & feel — rounded, not angular
+
+The brand is intentionally soft/rounded:
+
+- **Theme**: Materia (rounded GTK) + Papirus icons, applied to new users via
+  `/etc/skel` XFCE config (`build-rootfs.sh`, Stage 7). Window decorations are
+  set `round_edges=true`.
+- **Logo**: a rounded, gradient mark in `assets/logo.svg` (brand) and
+  `assets/deposit-turbo.svg` (tray icon). The turbo tray applet uses the
+  rounded icon.
+
+## Default apps & services
+
+To stay light for older hardware, the base image is curated, not bloated:
+
+- **Included**: XFCE desktop + goodies, NetworkManager applet (Wi-Fi in the
+  tray), PulseAudio volume control, screenshot tool, archive manager, font
+  viewer. A **firewall (`ufw`)** is installed but *not* auto-enabled, so SSH
+  isn't locked out.
+- **On demand via AQA** (keeps the base small): Chrome, Stream, the Turbo
+  applet, or anything from a URL (`aqa install http://…`).
+- A web browser is deliberately **not** baked in — install Chrome with
+  `aqa install chrome` when you need it.
+
 ## Testing
 
 - **Fast / offline** (no network, no real compile): `sudo bash tests/test_mlpds.sh`

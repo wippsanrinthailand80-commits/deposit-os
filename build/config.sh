@@ -42,7 +42,26 @@ DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
   gnupg netplan.io systemd systemd-sysv udev openssh-server vim-tiny curl}"
 
 # Optional lightweight desktop (XFCE). Leave empty for a headless/CLI build.
-DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm}"
+DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm xfce4-goodies}"
+
+# --- Rounded aesthetic (kept light: theme + icon set, no heavy DE extras) ---
+DEPOSIT_THEME_PKGS="${DEPOSIT_THEME_PKGS:-materia-gtk-theme papirus-icon-theme \
+  fonts-noto-color-emoji}"
+
+# --- Thai language support (fonts + locale). On by default. -----------------
+DEPOSIT_ENABLE_THAI="${DEPOSIT_ENABLE_THAI:-1}"
+DEPOSIT_THAI_FONTS="${DEPOSIT_THAI_FONTS:-fonts-thai-tlwg fonts-noto-cursive \
+  fonts-noto-color-emoji}"
+# Locales to generate in the image (Thai + English both present).
+DEPOSIT_LOCALES="${DEPOSIT_LOCALES:-en_US.UTF-8 th_TH.UTF-8}"
+
+# --- Curated "necessary" apps/services for a usable desktop (still light) ----
+# A browser is intentionally NOT baked in — install Chrome via `aqa install
+# chrome` to keep the base image small for older hardware.
+DEPOSIT_APPS="${DEPOSIT_APPS:-network-manager-gnome pavucontrol \
+  xfce4-screenshooter xarchiver gnome-font-viewer}"
+# Services: firewall present but not auto-enabled (so SSH isn't locked out).
+DEPOSIT_SERVICES="${DEPOSIT_SERVICES:-ufw}"
 
 # Kernel package is intentionally NOT installed in the rootfs because we build
 # and supply our own kernel via build-kernel.sh.

@@ -142,8 +142,68 @@ chrome|deb|https://dl.google.com/linux/direct/google-chrome-stable_current_amd64
 stream|deb|__STREAM_URL__
 EOF
 
+# --- Stage 5b: rounded theme, Thai language, curated apps/services ----------
+cat > "$ROOTFS/tmp/deposit-extra.sh" <<EOF
+#!/usr/bin/env bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
+APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THEME_PKGS
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_APPS
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_SERVICES
+if [ "$DEPOSIT_ENABLE_THAI" = "1" ]; then
+  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THAI_FONTS locales
+  for L in $DEPOSIT_LOCALES; do
+    sed -i "s|^#\? *\$L UTF-8|\$L UTF-8|" /etc/locale.gen
+  done
+  locale-gen
+  update-locale LANG=$DEPOSIT_DEFAULT_LOCALE
+fi
+EOF
+chmod +x "$ROOTFS/tmp/deposit-extra.sh"
+chroot "$ROOTFS" /tmp/deposit-extra.sh
+rm -f "$ROOTFS/tmp/deposit-extra.sh"
+
 umount_chroot
 trap - EXIT
+
+# --- Stage 7: rounded aesthetic (XFCE theme) + brand logo -------------------
+XCONF="$ROOTFS/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml"
+mkdir -p "$XCONF" "$ROOTFS/usr/share/pixmaps" \
+         "$ROOTFS/usr/share/icons/hicolor/scalable/apps"
+cat > "$XCONF/xsettings.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Materia"/>
+    <property name="IconThemeName" type="string" value="Papirus"/>
+    <property name="DoubleClickTime" type="int" value="400"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="FontName" type="string" value="Noto Sans 11"/>
+    <property name="MonospaceFontName" type="string" value="Noto Sans Mono 11"/>
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+    <property name="CursorSize" type="int" value="0"/>
+    <property name="DecorationLayout" type="string" value="menu:minimize,maximize,close"/>
+  </property>
+</channel>
+EOF
+cat > "$XCONF/xfwm4.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="Materia"/>
+    <property name="title_font" type="string" value="Noto Sans Bold 11"/>
+    <property name="button_layout" type="string" value="O|HMC"/>
+    <property name="round_edges" type="bool" value="true"/>
+    <property name="titleless_maximize" type="bool" value="true"/>
+  </property>
+</channel>
+EOF
+# Brand assets
+cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/pixmaps/deposit-logo.svg"
+cp "$REPO_ROOT/assets/deposit-turbo.svg" "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
+cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
 
 echo "[rootfs] done -> $ROOTFS"
 echo "[rootfs] next: build the kernel (./build/build-kernel.sh) then pack with: mlpds build"

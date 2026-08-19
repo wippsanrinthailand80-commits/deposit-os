@@ -46,6 +46,17 @@ out="$("$AQA" install "file://$WORK/fake.html" --dry-run 2>&1)"
 echo "$out" | grep -q "app.deb" && echo "$out" | grep -q "extra.mlpds" \
   && ok "install <url> scanned deb+mlpds" || bad "install <url> scanned deb+mlpds"
 
+echo "[8] build config has Thai/theme/apps + brand assets exist"
+if source "$REPO/build/config.sh" 2>/dev/null; then
+  [[ "${DEPOSIT_ENABLE_THAI:-0}" == "1" ]] && ok "thai enabled" || bad "thai enabled"
+  [[ -n "${DEPOSIT_THEME_PKGS:-}" ]] && ok "theme pkgs set" || bad "theme pkgs set"
+  [[ -n "${DEPOSIT_APPS:-}" ]] && ok "apps set" || bad "apps set"
+else
+  bad "could not source config.sh"
+fi
+[[ -f "$REPO/assets/logo.svg" && -f "$REPO/assets/deposit-turbo.svg" ]] \
+  && ok "brand logos exist" || bad "brand logos exist"
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 [[ $fail -eq 0 ]] && exit 0 || exit 1

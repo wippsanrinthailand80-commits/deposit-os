@@ -16,8 +16,16 @@ import os
 import subprocess
 
 STATE_FILE = "/var/lib/deposit-turbo/state"
-TURBO_ICON = "gtk-yes"
-NORMAL_ICON = "gtk-info"
+TURBO_ICON = "deposit-turbo"   # rounded brand icon (see components/turbo)
+FALLBACK_ICON = "gtk-yes"
+
+
+def set_icon(name):
+    try:
+        ind.set_icon(name)
+        return True
+    except Exception:
+        return False
 
 
 def turbo_state():
@@ -64,15 +72,18 @@ def on_toggle(_):
 
 def refresh_icon():
     s = turbo_state()
-    ind.set_icon(NORMAL_ICON if s == "off" else TURBO_ICON)
+    set_icon(TURBO_ICON if s == "on" else FALLBACK_ICON)
     return True
 
 
 ind = AppIndicator3.Indicator.new(
-    "deposit-turbo", NORMAL_ICON, AppIndicator3.IndicatorCategory.APPLICATION_STATUS
+    "deposit-turbo", FALLBACK_ICON, AppIndicator3.IndicatorCategory.APPLICATION_STATUS
 )
 ind.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 ind.set_title("Deposit Turbo")
+# prefer the rounded brand icon if present
+if not set_icon(TURBO_ICON):
+    set_icon(FALLBACK_ICON)
 
 menu = Gtk.Menu()
 item = Gtk.MenuItem.new_with_label("Toggle Turbo (Alt+K)")

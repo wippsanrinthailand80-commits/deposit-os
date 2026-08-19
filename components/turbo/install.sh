@@ -23,6 +23,11 @@ $SUDO cp deposit-tray.py "$APP_DIR/deposit-tray.py"
 $SUDO chmod +x "$APP_DIR/deposit-tray.py"
 $SUDO ln -sf "$APP_DIR/deposit-tray.py" "$DEST_BIN/deposit-tray"
 
+# rounded brand icon for the tray
+$SUDO mkdir -p /usr/share/icons/hicolor/scalable/apps
+$SUDO cp deposit-turbo.svg /usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg
+$SUDO gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
 # autostart (XFCE / any XDG autostart-aware DE)
 $SUDO mkdir -p /etc/xdg/autostart
 $SUDO cp deposit-turbo.desktop /etc/xdg/autostart/

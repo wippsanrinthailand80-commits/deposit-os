@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Deposit Turbo">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#5b6ef5"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="52" fill="url(#g)"/>
+  <!-- turbo / speed bolt, rounded -->
+  <path d="M70 34 L44 70 q-2 6 4 6 h16 l-10 22 q-2 6 5 5 l34 -40 q3 -6 -3 -7 h-16 z"
+        fill="#ffffff" stroke-linejoin="round"/>
+</svg>
