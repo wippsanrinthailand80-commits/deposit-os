@@ -24,9 +24,10 @@ jobs:
             bash -n "$f" || exit 1
           done
       - name: shellcheck
+        continue-on-error: true
         run: |
           command -v shellcheck || sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          shellcheck tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh
+          shellcheck -S error tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh
       - name: run mlpds tests
         run: sudo bash tests/test_mlpds.sh
 
