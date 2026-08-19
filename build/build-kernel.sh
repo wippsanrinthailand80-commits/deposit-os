@@ -47,7 +47,17 @@ mkdir -p "$DEPOSIT_BUILD_DIR" "$KOUT"
 # --- Download + extract -----------------------------------------------------
 if [[ ! -d "$SRC_DIR" ]]; then
   echo "[kernel] downloading linux-$KVER"
-  wget -qO "$DEPOSIT_BUILD_DIR/linux-$KVER.tar.xz" "$DEPOSIT_KERNEL_URL"
+  DL_OK=0
+  for U in "$DEPOSIT_KERNEL_URL" \
+           "https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-${KVER}.tar.xz" \
+           "https://ftp.yz.yamagata-u.ac.jp/pub/linux/kernel.org/pub/linux/kernel/v6.x/linux-${KVER}.tar.xz"; do
+    echo "[kernel] trying $U"
+    if wget --tries=3 --timeout=60 --waitretry=10 -qO "$DEPOSIT_BUILD_DIR/linux-$KVER.tar.xz" "$U"; then
+      DL_OK=1; break
+    fi
+    echo "[kernel] download failed, trying next mirror"
+  done
+  (( DL_OK )) || { echo "[kernel] all download attempts failed"; exit 1; }
   echo "[kernel] extracting"
   tar -C "$DEPOSIT_BUILD_DIR" -xf "$DEPOSIT_BUILD_DIR/linux-$KVER.tar.xz"
 fi
