@@ -51,9 +51,10 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev wget xz-utils cpio kmod ccache
       - name: compile kernel
-        # DEPOSIT_KERNEL_JOBS=1 caps parallelism -> single GCC at a time,
-        # much smaller RAM spike (trade-off: slower build).
-        run: sudo DEPOSIT_KERNEL_JOBS=1 bash build/build-kernel.sh
+        # Enlarged (real-hardware) kernel: use both runner cores so the
+        # bigger build stays under the timeout. Lower DEPOSIT_KERNEL_JOBS for
+        # less RAM at the cost of build time.
+        run: sudo DEPOSIT_KERNEL_JOBS=2 bash build/build-kernel.sh
       - name: package kernel tarball
         run: sudo tar -C build/output -cf build/output/kernel.tar kernel
       - name: upload kernel
