@@ -1,0 +1,101 @@
+name: Deposit OS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1) Tool + .mlpds unit tests — fast, no network.
+  # --------------------------------------------------------------------------
+  tool-tests:
+    name: mlpds tool + scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: syntax check
+        run: |
+          for f in tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh tests/*.sh; do
+            bash -n "$f" || exit 1
+          done
+      - name: shellcheck
+        run: |
+          command -v shellcheck || sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          shellcheck tools/mlpds build/*.sh tools/mlpds-installer/installer/install.sh
+      - name: run mlpds tests
+        run: sudo bash tests/test_mlpds.sh
+
+  # --------------------------------------------------------------------------
+  # 2) Compile the Linux kernel from upstream source (truly "from the kernel").
+  # --------------------------------------------------------------------------
+  build-kernel:
+    name: build kernel from source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: build deps
+        run: sudo bash build/build-kernel.sh --deps
+      - name: compile kernel
+        run: sudo bash build/build-kernel.sh
+      - name: upload kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-kernel
+          path: build/output/kernel
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # 3) Assemble the apt/.deb-compatible userspace (debootstrap).
+  # --------------------------------------------------------------------------
+  build-rootfs:
+    name: assemble userspace (apt compatible)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install debootstrap
+        run: sudo apt-get update -qq && sudo apt-get install -y debootstrap
+      - name: build rootfs
+        run: sudo bash build/build-rootfs.sh build/output/rootfs
+      - name: upload rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-rootfs
+          path: build/output/rootfs
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # 4) Package a real .mlpds install file from the built kernel + rootfs.
+  # --------------------------------------------------------------------------
+  package:
+    name: package .mlpds installer
+    runs-on: ubuntu-24.04
+    needs: [build-kernel, build-rootfs]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deposit-kernel
+          path: build/output/kernel
+      - uses: actions/download-artifact@v4
+        with:
+          name: deposit-rootfs
+          path: build/output/rootfs
+      - name: create .mlpds
+        run: |
+          sudo bash tools/mlpds create \
+            --rootfs build/output/rootfs \
+            --kernel build/output/kernel \
+            --out deposit.os.mlpds \
+            --type os
+          sudo bash tools/mlpds info deposit.os.mlpds
+      - name: upload .mlpds
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-os-mlpds
+          path: deposit.os.mlpds
+          if-no-files-found: error

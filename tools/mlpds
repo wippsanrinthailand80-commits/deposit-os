@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# ============================================================================
+# mlpds — the Deposit OS installer tool
+# ----------------------------------------------------------------------------
+#   mlpds build-kernel            compile the Linux kernel from source
+#   mlpds build-rootfs [DIR]      assemble the apt-compatible userspace
+#   mlpds create  ...             package a .mlpds install file
+#   mlpds info    FILE            show the manifest
+#   mlpds extract FILE [-d DIR]   unpack a .mlpds file
+#   mlpds install FILE --target T [--boot] [opts]   install it
+#   mlpds launch  FILE            boot it in QEMU (if available)
+#
+# A .mlpds file installs "various things" — set --type os|app|driver|bundle.
+# See .mlpds/spec.md.
+# ============================================================================
+set -euo pipefail
+
+MLPDS_VERSION="1.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="$REPO_DIR/build"
+CONFIG_SH="$BUILD_DIR/config.sh"
+INSTALLER_TEMPLATE="$REPO_DIR/tools/mlpds-installer/installer"
+
+log(){ printf '[mlpds] %s\n' "$*"; }
+die(){ printf '[mlpds][ERR] %s\n' "$*" >&2; exit 1; }
+
+[[ -f "$CONFIG_SH" ]] && source "$CONFIG_SH"
+
+usage(){
+  sed -n '3,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+# ---------------------------------------------------------------------------
+# build-kernel / build-rootfs — thin wrappers around build/*.sh
+# ---------------------------------------------------------------------------
+cmd_build_kernel(){ bash "$BUILD_DIR/build-kernel.sh" "$@"; }
+cmd_build_rootfs(){ bash "$BUILD_DIR/build-rootfs.sh" "${1:-}"; }
+
+# ---------------------------------------------------------------------------
+# create — package a .mlpds file
+# ---------------------------------------------------------------------------
+cmd_create(){
+  local rootfs="" kernel="" out="" type="os" installer="" files="" squash=0 cfg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --rootfs)   rootfs="$2"; shift 2 ;;
+      --kernel)   kernel="$2"; shift 2 ;;
+      --out)      out="$2"; shift 2 ;;
+      --type)     type="$2"; shift 2 ;;
+      --installer) installer="$2"; shift 2 ;;
+      --files)    files="$2"; shift 2 ;;
+      --config)   cfg="$2"; shift 2 ;;
+      --squash)   squash=1; shift ;;
+      *) die "create: unknown arg $1" ;;
+    esac
+  done
+
+  [[ -n "$out" ]] || die "create: --out FILE is required"
+  [[ "$type" == "os" ]] && [[ -d "$rootfs" ]] || \
+    { [[ "$type" != "os" ]] || die "create: --rootfs DIR required for type=os"; }
+
+  local tmp; tmp="$(mktemp -d)"
+  trap "rm -rf '$tmp'" EXIT
+
+  # rootfs payload
+  local rkind sum
+  if [[ "$type" == "os" ]]; then
+    if (( squash )); then
+      command -v mksquashfs >/dev/null || die "create: mksquashfs missing (install squashfs-tools)"
+      mksquashfs "$rootfs" "$tmp/rootfs.squashfs" -comp xz -noappend
+      rkind="squashfs"
+      sum="$(sha256sum "$tmp/rootfs.squashfs" | cut -d' ' -f1)"
+    else
+      cp -a "$rootfs/." "$tmp/rootfs"
+      rkind="tree"
+      sum="$(tar -C "$tmp" -cf - rootfs | sha256sum | cut -d' ' -f1)"
+    fi
+  else
+    rkind="none"; sum=""
+  fi
+
+  # kernel (optional, makes the .mlpds self-booting / offline)
+  if [[ -n "$kernel" ]]; then
+    [[ -d "$kernel" ]] || die "create: --kernel dir not found: $kernel"
+    mkdir -p "$tmp/boot"
+    cp -a "$kernel/." "$tmp/boot/"
+  fi
+
+  # bundled extra files (for app/driver/bundle types)
+  if [[ -n "$files" ]]; then
+    [[ -d "$files" ]] || die "create: --files dir not found: $files"
+    cp -a "$files/." "$tmp/"
+  fi
+
+  # installer payload
+  local inst="$INSTALLER_TEMPLATE"
+  [[ -n "$installer" ]] && inst="$installer"
+  [[ -d "$inst" ]] || die "create: installer dir not found: $inst"
+  mkdir -p "$tmp/installer"
+  cp -a "$inst/." "$tmp/installer/"
+  chmod +x "$tmp/installer/install.sh" 2>/dev/null || true
+
+  # config defaults
+  mkdir -p "$tmp/config"
+  if [[ -n "$cfg" ]]; then
+    cp "$cfg" "$tmp/config/defaults.json"
+  else
+    cat > "$tmp/config/defaults.json" <<JSON
+{
+  "hostname": "${DEPOSIT_DEFAULT_HOSTNAME:-deposit}",
+  "user": "${DEPOSIT_DEFAULT_USER:-deposit}",
+  "locale": "${DEPOSIT_DEFAULT_LOCALE:-en_US.UTF-8}",
+  "timezone": "${DEPOSIT_DEFAULT_TIMEZONE:-UTC}"
+}
+JSON
+  fi
+
+  # package list (informational) from the dpkg db if present
+  local pkgs="[]"
+  if [[ -f "$rootfs/var/lib/dpkg/status" ]]; then
+    pkgs="$(grep -E '^Package: ' "$rootfs/var/lib/dpkg/status" | awk '{print $2}' | sort -u | paste -sd' ' - | sed 's/[^ ]*/"&"/g; s/ /, /g; s/^/[/; s/$/]/')"
+  fi
+
+  # kernel info
+  local kver="" kimg="" kmods=""
+  if [[ -n "$kernel" ]]; then
+    kver="$(cat "$kernel/kernel-release" 2>/dev/null || echo "")"
+    kimg="boot/vmlinuz-${kver}"
+    kmods="lib/modules/${kver}"
+  fi
+
+  cat > "$tmp/manifest.json" <<JSON
+{
+  "format": "mlpds",
+  "format_version": "$MLPDS_VERSION",
+  "type": "$type",
+  "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "builder": "deposit mlpds $MLPDS_VERSION",
+  "distro": {
+    "name": "${DEPOSIT_NAME:-deposit}",
+    "pretty": "${DEPOSIT_PRETTY:-Deposit OS}",
+    "version": "${DEPOSIT_VERSION:-0.1.0}",
+    "id": "${DEPOSIT_ID:-deposit}",
+    "id_like": "${DEPOSIT_ID_LIKE:-ubuntu debian}"
+  },
+  "target": {
+    "arch": "${DEPOSIT_ARCH:-$(uname -m)}",
+    "suite": "${DEPOSIT_SUITE:-noble}",
+    "components": "${DEPOSIT_COMPONENTS:-main,universe}"
+  },
+  "kernel": { "version": "$kver", "image": "$kimg", "modules": "$kmods" },
+  "rootfs": { "kind": "$rkind", "checksum_sha256": "$sum" },
+  "packages": $pkgs
+}
+JSON
+
+  tar -C "$tmp" -cf - --transform='s,^\./,,' --owner=0 --group=0 . | xz -c > "$out"
+  log "created $out  (type=$type, rootfs=$rkind, $(du -h "$out" | cut -f1))"
+}
+
+# ---------------------------------------------------------------------------
+# info — print the manifest
+# ---------------------------------------------------------------------------
+cmd_info(){
+  local f="${1:-}"; [[ -f "$f" ]] || die "info: file not found: $f"
+  tar -xOf "$f" manifest.json
+}
+
+# ---------------------------------------------------------------------------
+# extract — unpack to a directory
+# ---------------------------------------------------------------------------
+cmd_extract(){
+  local f="" out=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -d|--out) out="$2"; shift 2 ;;
+      --out=*)  out="${1#*=}"; shift ;;
+      -*) die "extract: unknown arg $1" ;;
+      *) f="$1"; shift ;;
+    esac
+  done
+  [[ -f "$f" ]] || die "extract: file not found: $f"
+  out="${out:-${f%.mlpds}.extracted}"
+  mkdir -p "$out"
+  tar -C "$out" -xf "$f"
+  log "extracted -> $out"
+}
+
+# ---------------------------------------------------------------------------
+# install — run the payload installer
+# ---------------------------------------------------------------------------
+cmd_install(){
+  local f="" target="" boot=0 hostname="" user="" rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target) target="$2"; shift 2 ;;
+      --boot)   boot=1; shift ;;
+      --hostname) hostname="$2"; shift 2 ;;
+      --user)   user="$2"; shift 2 ;;
+      --out=*)  shift ;;
+      -*) die "install: unknown arg $1" ;;
+      *) f="$1"; shift ;;
+    esac
+  done
+  [[ -f "$f" ]] || die "install: file not found: $f"
+  [[ -n "$target" ]] || die "install: --target DIR|DEVICE required"
+
+  local tmp; tmp="$(mktemp -d)"
+  trap "rm -rf '$tmp'" EXIT
+  tar -C "$tmp" -xf "$f"
+
+  # verify + locate rootfs
+  local rkind; rkind="$(tar -xOf "$f" manifest.json | grep -o '"kind"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')"
+  local rf="$tmp/rootfs"
+  if [[ "$rkind" == "squashfs" ]]; then
+    command -v unsquashfs >/dev/null || die "install: unsquashfs missing for squashfs rootfs"
+    unsquashfs -f -d "$rf" "$tmp/rootfs.squashfs" >/dev/null
+  elif [[ "$rkind" == "tree" ]]; then
+    : # already a dir
+  fi
+
+  local args=(--target "$target" --rootfs "$rf")
+  [[ -d "$tmp/boot" ]] && args+=(--kernel "$tmp/boot")
+  (( boot )) && args+=(--boot)
+  [[ -n "$hostname" ]] && args+=(--hostname "$hostname")
+  [[ -n "$user" ]] && args+=(--user "$user")
+
+  log "running installer"
+  bash "$tmp/installer/install.sh" "${args[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# launch — boot in QEMU (best effort)
+# ---------------------------------------------------------------------------
+cmd_launch(){
+  local f="${1:-}"; [[ -f "$f" ]] || die "launch: file not found: $f"
+  local qemu="qemu-system-$([[ "${DEPOSIT_ARCH:-$(uname -m)}" == "aarch64" ]] && echo aarch64 || echo x86_64)"
+  command -v "$qemu" >/dev/null || die "launch: $qemu not installed (install qemu-system-*)"
+  local tmp; tmp="$(mktemp -d)"
+  trap "rm -rf '$tmp'" EXIT
+  tar -C "$tmp" -xf "$f"
+  local kimg rf
+  kimg="$(ls "$tmp/boot"/vmlinuz-* 2>/dev/null | head -1)"
+  [[ -n "$kimg" ]] || die "launch: no kernel image in .mlpds"
+  rf="$tmp/rootfs"
+  [[ -d "$rf" ]] || die "launch: no rootfs tree in .mlpds (squashfs launch needs unsquashfs)"
+  # Build a throwaway raw disk from the rootfs dir.
+  local img="$tmp/disk.img"
+  if command -v virt-make-fs >/dev/null; then
+    virt-make-fs --size=+2G --type=ext4 "$rf" "$img" >/dev/null
+  else
+    die "launch: virt-make-fs missing (install libguestfs-tools) — cannot build boot disk"
+  fi
+  log "booting $kimg with $img"
+  "$qemu" -m 1024 -kernel "$kimg" -append "root=/dev/sda ro console=ttyS0" \
+    -drive file="$img",format=raw,if=ide -nographic
+}
+
+# ---------------------------------------------------------------------------
+[[ $# -eq 0 ]] && usage 1
+case "$1" in
+  build-kernel) shift; cmd_build_kernel "$@" ;;
+  build-rootfs) shift; cmd_build_rootfs "$@" ;;
+  create)       shift; cmd_create "$@" ;;
+  info)         shift; cmd_info "$@" ;;
+  extract)      shift; cmd_extract "$@" ;;
+  install)      shift; cmd_install "$@" ;;
+  launch)       shift; cmd_launch "$@" ;;
+  -h|--help|help) usage 0 ;;
+  *) die "unknown command: $1 (try: mlpds --help)" ;;
+esac
