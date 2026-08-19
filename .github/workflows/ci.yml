@@ -133,8 +133,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb xterm scrot python3-pil fonts-dejavu
           chmod +x tools/mlpds
           mkdir -p /tmp/os-shot
-          xvfb-run -a bash -c 'xterm -geometry 100x40 -e bash ci/os-info.sh & sleep 10; scrot -o /tmp/os-shot/os.png' || true
-          [ -s /tmp/os-shot/os.png ] || python3 ci/render_log.py /tmp/os-shot/os.log /tmp/os-shot/os.png 2>/dev/null || true
+          xvfb-run -a bash -c 'xterm -geometry 100x40 -e bash ci/os-info.sh & sleep 10; scrot -o /tmp/os-shot/os_raw.png' || true
+          python3 ci/render_log.py /tmp/os-shot/os.log /tmp/os-shot/os.png "Deposit OS — mlpds info" 2>/dev/null \
+            || cp /tmp/os-shot/os_raw.png /tmp/os-shot/os.png 2>/dev/null \
+            || true
           ls -l /tmp/os-shot/os.png 2>/dev/null || echo "no png"
       - name: publish built .mlpds screenshot
         if: always()
@@ -168,11 +170,11 @@ jobs:
         run: |
           chmod +x tools/mlpds tools/aqa tools/deposit-turbo
           mkdir -p /tmp/shots
-          xvfb-run -a bash -c 'xterm -geometry 120x44 -e "bash ci/demo.sh; echo; echo [capturing...]; sleep 3" & sleep 12; scrot -o /tmp/shots/demo.png' || true
-          if [ ! -s /tmp/shots/demo.png ]; then
-            echo "scrot failed, rendering log to PNG"
-            python3 ci/render_log.py /tmp/shots/demo.log /tmp/shots/demo.png
-          fi
+          xvfb-run -a bash -c 'xterm -geometry 120x44 -e "bash ci/demo.sh; echo; echo [capturing...]; sleep 3" & sleep 12; scrot -o /tmp/shots/demo_raw.png' || true
+          # clean, content-sized render of the log (legible in the Summary tab)
+          python3 ci/render_log.py /tmp/shots/demo.log /tmp/shots/demo.png "Deposit OS — tool demo (.mlpds + AQA)" 2>/tmp/shots/render.err \
+            || cp /tmp/shots/demo_raw.png /tmp/shots/demo.png 2>/dev/null \
+            || true
           ls -l /tmp/shots/demo.png
       - name: publish to job summary
         run: |
