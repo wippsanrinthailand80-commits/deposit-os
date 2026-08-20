@@ -102,6 +102,9 @@ cmd_create(){
   cp -a "$inst/." "$tmp/installer/"
   chmod +x "$tmp/installer/install.sh" 2>/dev/null || true
 
+  # Integrity hash of the installer payload (the script later executed as root).
+  local ins_sum="$(tar -C "$tmp" -cf - installer | sha256sum | cut -d' ' -f1)"
+
   # config defaults
   mkdir -p "$tmp/config"
   if [[ -n "$cfg" ]]; then
@@ -152,6 +155,7 @@ JSON
   },
   "kernel": { "version": "$kver", "image": "$kimg", "modules": "$kmods" },
   "rootfs": { "kind": "$rkind", "checksum_sha256": "$sum" },
+  "installer": { "checksum_sha256": "$ins_sum" },
   "packages": $pkgs
 }
 JSON
@@ -220,6 +224,36 @@ cmd_install(){
   elif [[ "$rkind" == "tree" ]]; then
     : # already a dir
   fi
+
+  # --- Trust chain: verify integrity BEFORE executing any payload as root ----
+  # The .mlpds manifest carries sha256 of the rootfs and the installer scripts
+  # (which run as root). A mismatch means the file was tampered with in transit
+  # or on the server, so we refuse to install it.
+  verify_integrity(){
+    local mf="$tmp/manifest.json"
+    [[ -f "$mf" ]] || die "install: no manifest in .mlpds"
+    local rsum isum actual iactual
+    rsum="$(python3 -c "import sys,json;print(json.load(open('$mf')).get('rootfs',{}).get('checksum_sha256',''))" 2>/dev/null || true)"
+    isum="$(python3 -c "import sys,json;print(json.load(open('$mf')).get('installer',{}).get('checksum_sha256',''))" 2>/dev/null || true)"
+    if [[ "$rkind" == "squashfs" ]]; then
+      actual="$(sha256sum "$tmp/rootfs.squashfs" | cut -d' ' -f1)"
+    elif [[ "$rkind" == "tree" ]]; then
+      actual="$(tar -C "$tmp" -cf - rootfs | sha256sum | cut -d' ' -f1)"
+    else
+      actual=""   # type has no rootfs payload
+    fi
+    if [[ -n "$actual" && -n "$rsum" ]]; then
+      [[ "$actual" == "$rsum" ]] || die "install: rootfs checksum MISMATCH (expected $rsum, got $actual) — refusing to install"
+    elif [[ -n "$actual" && -z "$rsum" ]]; then
+      log "warn: manifest has no rootfs checksum; skipping rootfs verification"
+    fi
+    if [[ -n "$isum" ]]; then
+      iactual="$(tar -C "$tmp" -cf - installer | sha256sum | cut -d' ' -f1)"
+      [[ "$iactual" == "$isum" ]] || die "install: installer checksum MISMATCH — refusing to install"
+    fi
+    log "integrity verified (rootfs ok, installer ok)"
+  }
+  verify_integrity
 
   local args=(--target "$target" --rootfs "$rf")
   [[ -d "$tmp/boot" ]] && args+=(--kernel "$tmp/boot")
