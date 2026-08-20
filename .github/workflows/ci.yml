@@ -67,14 +67,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           { echo "## tool-tests FAILED (${GITHUB_SHA})"; echo '```'; tail -n 70 /tmp/tt_mlpds.log /tmp/tt_aqa.log /tmp/shots/demo.log 2>/dev/null; echo '```'; } > /tmp/err.md
-          python3 - <<'PY'
-import json,urllib.request,os
-body=open('/tmp/err.md').read()[:3500]
-data=json.dumps({"body":body}).encode()
-req=urllib.request.Request("https://api.github.com/repos/%s/commits/%s/comments"%(os.environ["GITHUB_REPOSITORY"],os.environ["GITHUB_SHA"]),
-  data=data,headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"},method="POST")
-print("posted failure comment:",urllib.request.urlopen(req).status)
-PY
+          python3 ci/report_failure.py
 
   # --------------------------------------------------------------------------
   # 2) Compile the Linux kernel from upstream source (truly "from the kernel").
@@ -140,14 +133,7 @@ PY
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           { echo "## build-rootfs FAILED (${GITHUB_SHA})"; echo '```'; tail -n 70 /tmp/rootfs.log 2>/dev/null; echo '```'; } > /tmp/err.md
-          python3 - <<'PY'
-import json,urllib.request,os
-body=open('/tmp/err.md').read()[:3500]
-data=json.dumps({"body":body}).encode()
-req=urllib.request.Request("https://api.github.com/repos/%s/commits/%s/comments"%(os.environ["GITHUB_REPOSITORY"],os.environ["GITHUB_SHA"]),
-  data=data,headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"},method="POST")
-print("posted failure comment:",urllib.request.urlopen(req).status)
-PY
+          python3 ci/report_failure.py
 
   # --------------------------------------------------------------------------
   # 4) Package the .mlpds installer, THEN actually boot Deposit OS in QEMU and
@@ -188,11 +174,11 @@ PY
           echo "release signing key ready ($(wc -l < ci/release-key.asc) lines)"
       - name: create .mlpds
         run: |
-          sudo bash -c 'DEPOSIT_RELEASE=1 DEPOSIT_GPG_PRIVATE_FILE="$PWD/ci/release-key.asc" bash tools/mlpds create \
+          sudo env DEPOSIT_RELEASE=1 DEPOSIT_GPG_PRIVATE_FILE="$PWD/ci/release-key.asc" bash tools/mlpds create \
             --rootfs build/output/rootfs \
             --kernel build/output/kernel \
             --out deposit.os.mlpds \
-            --type os' 2>&1 | tee /tmp/pkg.log
+            --type os 2>&1 | tee /tmp/pkg.log
           sudo bash tools/mlpds info deposit.os.mlpds 2>&1 | tee -a /tmp/pkg.log
       - name: screenshot the built .mlpds (info)
         run: |
@@ -265,11 +251,4 @@ PY
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           { echo "## package-and-live FAILED (${GITHUB_SHA})"; echo '```'; tail -n 70 /tmp/pkg.log /tmp/os-shot/os.log 2>/dev/null; echo '```'; } > /tmp/err.md
-          python3 - <<'PY'
-import json,urllib.request,os
-body=open('/tmp/err.md').read()[:3500]
-data=json.dumps({"body":body}).encode()
-req=urllib.request.Request("https://api.github.com/repos/%s/commits/%s/comments"%(os.environ["GITHUB_REPOSITORY"],os.environ["GITHUB_SHA"]),
-  data=data,headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"},method="POST")
-print("posted failure comment:",urllib.request.urlopen(req).status)
-PY
+          python3 ci/report_failure.py
