@@ -29,9 +29,42 @@ need() { command -v "$1" >/dev/null || { echo "missing required tool: $1" >&2; e
 need debootstrap
 need tar
 
+# --- Cross-build detection (host arch vs target debootstrap arch) ------------
+qemu_arch() { case "$1" in arm64) echo aarch64;; amd64) echo x86_64;; armhf) echo arm;; *) echo "$1";; esac; }
+QA="$(qemu_arch "$BOOT_ARCH")"
+CROSS=0
+case "$BOOT_ARCH" in
+  arm64) [[ "$(uname -m)" != "aarch64" ]] && CROSS=1 ;;
+  armhf) [[ "$(uname -m)" != "armv7l"  ]] && CROSS=1 ;;
+  amd64) [[ "$(uname -m)" != "x86_64"  ]] && CROSS=1 ;;
+esac
+if (( CROSS )); then
+  echo "[rootfs] CROSS build: host=$(uname -m) target=$BOOT_ARCH (needs qemu-user-static + binfmt)"
+  QEMU_STATIC="$(command -v "qemu-${QA}-static" 2>/dev/null || true)"
+  if [[ -z "$QEMU_STATIC" ]]; then
+    echo "[rootfs] installing qemu-user-static + binfmt-support"
+    (apt-get update -qq && apt-get install -y -qq qemu-user-static binfmt-support) 2>/dev/null \
+      || echo "WARN: could not install qemu-user-static (cross build may fail)"
+    QEMU_STATIC="$(command -v "qemu-${QA}-static" 2>/dev/null || true)"
+  fi
+  if [[ ! -e /proc/sys/fs/binfmt_misc/qemu-"$QA" ]]; then
+    update-binfmts --enable "qemu-$QA" 2>/dev/null || systemctl restart systemd-binfmt 2>/dev/null || true
+  fi
+fi
+
 # --- Stage 1: debootstrap minbase -------------------------------------------
 if [[ -d "$ROOTFS" && -f "$ROOTFS/debootstrap/debootstrap.log" ]]; then
   echo "[rootfs] reusing existing debootstrap at $ROOTFS (remove to rebuild)"
+elif (( CROSS )); then
+  rm -rf "$ROOTFS"; mkdir -p "$ROOTFS"
+  echo "[rootfs] running debootstrap --foreign (minbase, $BOOT_ARCH)..."
+  debootstrap --foreign --variant=minbase --components="$DEPOSIT_COMPONENTS" \
+    --arch="$BOOT_ARCH" "$DEPOSIT_SUITE" "$ROOTFS" "$MIRROR"
+  echo "[rootfs] second-stage (under qemu-user)..."
+  chroot "$ROOTFS" /debootstrap/debootstrap --second-stage
+  # Keep the static interpreter in the rootfs so later chroot apt steps work
+  # even with a non-fix-binary binfmt registration; removed before we finish.
+  [[ -n "${QEMU_STATIC:-}" ]] && cp "$QEMU_STATIC" "$ROOTFS/usr/bin/" 2>/dev/null || true
 else
   rm -rf "$ROOTFS"
   mkdir -p "$ROOTFS"
@@ -214,11 +247,13 @@ cp "$REPO_ROOT/tools/deposit-security"      "$ROOTFS/usr/local/bin/deposit-secur
 cp "$REPO_ROOT/tools/deposit-updater"       "$ROOTFS/usr/local/bin/deposit-updater"
 cp "$REPO_ROOT/tools/deposit-store"         "$ROOTFS/usr/local/bin/deposit-store"
 cp "$REPO_ROOT/tools/deposit-oobe"          "$ROOTFS/usr/local/bin/deposit-oobe"
+cp "$REPO_ROOT/tools/deposit-settings"       "$ROOTFS/usr/local/bin/deposit-settings"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
          "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \
          "$ROOTFS/usr/local/bin/deposit-security" "$ROOTFS/usr/local/bin/deposit-updater" \
-         "$ROOTFS/usr/local/bin/deposit-store" "$ROOTFS/usr/local/bin/deposit-oobe"
+         "$ROOTFS/usr/local/bin/deposit-store" "$ROOTFS/usr/local/bin/deposit-oobe" \
+         "$ROOTFS/usr/local/bin/deposit-settings"
 
 # Desktop entry for the file manager.
 mkdir -p "$ROOTFS/usr/share/applications"
@@ -262,6 +297,18 @@ EOF
 # Show it on the live user's desktop.
 mkdir -p "$ROOTFS/etc/skel/Desktop"
 cp "$ROOTFS/usr/share/applications/deposit-install.desktop" "$ROOTFS/etc/skel/Desktop/"
+
+# Desktop entry for the Settings hub (Samsung One UI / Android-hybrid).
+cat > "$ROOTFS/usr/share/applications/deposit-settings.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit Settings
+Comment=Samsung-style settings hub (gear)
+Exec=deposit-settings
+Terminal=false
+Icon=deposit-gear
+Categories=Settings;System;
+EOF
 
 # Autostart the quick menu in the XFCE session.
 mkdir -p "$ROOTFS/etc/xdg/autostart"
@@ -347,6 +394,7 @@ cat > "$XCONF/xfwm4.xml" <<'EOF'
 EOF
 # Brand assets
 cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/pixmaps/deposit-logo.svg"
+cp "$REPO_ROOT/assets/gear.svg"          "$ROOTFS/usr/share/pixmaps/deposit-gear.svg"
 cp "$REPO_ROOT/assets/deposit-turbo.svg" "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
 cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
 
@@ -388,5 +436,9 @@ cat > "$XCONF/xfce4-desktop.xml" <<'EOF'
 </channel>
 EOF
 
+# Strip the cross-build interpreter so the shipped image stays clean.
+if (( CROSS )); then
+  rm -f "$ROOTFS/usr/bin/qemu-${QA}-static" 2>/dev/null || true
+fi
 echo "[rootfs] done -> $ROOTFS"
 echo "[rootfs] next: build the kernel (./build/build-kernel.sh) then pack with: mlpds build"

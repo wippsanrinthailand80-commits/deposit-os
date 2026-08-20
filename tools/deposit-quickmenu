@@ -222,6 +222,8 @@ class QuickMenu(Gtk.Window):
         self.t_sec = self._tile("Security", False, self.on_security)
         self.t_store = self._tile("Store", False, self.on_store)
         self.t_upd = self._tile("Updates", False, self.on_updates)
+        self.t_set = self._tile("Settings", False, self.on_settings)
+        self.t_about = self._tile("About", False, self.on_about)
         grid.attach(self.t_wifi, 0, 0, 1, 1)
         grid.attach(self.t_air, 1, 0, 1, 1)
         grid.attach(self.t_turbo, 0, 1, 1, 1)
@@ -232,6 +234,8 @@ class QuickMenu(Gtk.Window):
         grid.attach(self.t_sec, 1, 3, 1, 1)
         grid.attach(self.t_store, 0, 4, 1, 1)
         grid.attach(self.t_upd, 1, 4, 1, 1)
+        grid.attach(self.t_set, 0, 5, 1, 1)
+        grid.attach(self.t_about, 1, 5, 1, 1)
         box.pack_start(grid, False, False, 0)
 
         # brightness
@@ -350,6 +354,12 @@ class QuickMenu(Gtk.Window):
 
     def on_updates(self, btn):
         launch(["deposit-updater"])
+
+    def on_settings(self, btn):
+        launch(["deposit-settings"])
+
+    def on_about(self, btn):
+        launch(["deposit-settings"])
 
     def on_power(self, btn):
         d = Gtk.Dialog(title="Power", parent=self,

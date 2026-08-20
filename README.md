@@ -14,10 +14,15 @@ adds its own packaging format (`.mlpds`) and installer (`aqa`).
 - **Turbo mode**: one command flips the CPU/GPU into maximum-performance
   (`performance` governor + GPU power profile) with a spinning/fade transition FX.
 - **Security**: AppArmor (in the kernel), ClamAV antivirus, and a firewall
-  (`ufw`) — surfaced in the quick menu.
+  (`ufw`) — surfaced in the quick menu. `.mlpds` packages are GPG-signed and
+  verified on install; `aqa` requires a sha256 for any web-sourced `.deb`, and
+  `deposit-install` refuses to wipe the disk the OS is currently running from.
 - **Samsung-style quick menu**: a floating, toggleable panel
   (`Super+Q`) with Wi‑Fi, Airplane, Turbo, LAN toggles, Brightness **and
-  Volume** sliders, a Security section, and a drive-centric file manager.
+  Volume** sliders, a Security section, and a **Settings** + **About** tile.
+- **Settings hub**: a simple Samsung One UI / Android-hybrid settings app
+  (gear icon) with Wi‑Fi/Airplane/Turbo toggles, Brightness/Volume sliders,
+  and one-tap access to Security, Updates and About.
 - **Thai language** support out of the box, plus a rounded, branded aesthetic.
 
 ## Screenshots
@@ -115,17 +120,34 @@ aqa list                   # list installed packages
 
 | Resource     | Minimum | Recommended |
 |--------------|---------|-------------|
-| Architecture | x86_64 (amd64) | x86_64; ARM64 is *test-only, not yet supported* |
+| Architecture | x86_64 (amd64) | x86_64; ARM64 is *test-only, not yet supported* ([port plan #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1)) |
 | RAM          | 1 GB    | 2 GB+ |
 | Storage      | 8 GB    | 16 GB+ |
 | Graphics     | VGA / any (boots headless too) | GPU with open drivers for Turbo |
 | Network      | optional | Ethernet or Wi‑Fi |
 
+## Status & roadmap
+
+Deposit OS is functional and reproducibly built in CI, but is still maturing:
+
+- **Long-term stability** — not yet validated across a wide range of hardware.
+- **Update path** — OS updates today rely on `apt` + `aqa`; a unified,
+  user-centric updater is planned.
+- **Hardware support** — the ~45 MB kernel aims for broad support but is not yet
+  extensively field-tested. **ARM64** is tracked in
+  [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1).
+- **UI/UX polish** — the full feature set exists (quick menu, Settings hub, Turbo
+  FX); visual refinement continues.
+- **Docs & support** — a user manual and built-in troubleshooting tool are still
+  TODO.
+
 ## Project layout
 
 ```
 build/                 kernel + rootfs build scripts and config
-tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu, deposit-files, deposit-av, deposit-turbo-fx
+tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu, deposit-settings,
+                       deposit-files, deposit-av, deposit-turbo-fx, deposit-security,
+                       deposit-store, deposit-updater, deposit-oobe, deposit-install
 ci/                    make-disk.sh, make-iso.sh, live-boot.sh, demo + render helpers
 docs/assets/           screenshots used in this README
 ```

@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      arm64:
+        description: 'Build + boot the general-purpose ARM64 OS image (UEFI)'
+        type: boolean
+        default: false
 
 jobs:
   # --------------------------------------------------------------------------
@@ -37,19 +42,31 @@ jobs:
       - name: tool demo + screenshot
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
-          sudo apt-get install -y --no-install-recommends xvfb xterm scrot python3-pil fonts-dejavu
-          chmod +x tools/mlpds tools/aqa tools/deposit-turbo
+          sudo apt-get install -y --no-install-recommends xvfb xterm scrot python3-pil fonts-dejavu \
+            python3-gi gir1.2-gtk-3.0 adwaita-icon-theme
+          chmod +x tools/mlpds tools/aqa tools/deposit-turbo tools/deposit-settings tools/deposit-quickmenu
           mkdir -p /tmp/shots
-          xvfb-run -a bash -c 'xterm -geometry 120x44 -e "bash ci/demo.sh; echo; echo [capturing...]; sleep 3" & sleep 12; scrot -o /tmp/shots/demo_raw.png' || true
+          # Run the tool demo inside a terminal, then let the terminal close.
+          xvfb-run -a bash -c 'xterm -geometry 120x44 -e "bash ci/demo.sh; echo; echo [done]; sleep 2" & sleep 12; scrot -o /tmp/shots/demo_raw.png' || true
           python3 ci/render_log.py /tmp/shots/demo.log /tmp/shots/demo.png "Deposit OS — tool demo (.mlpds + AQA)" 2>/tmp/shots/render.err \
             || cp /tmp/shots/demo_raw.png /tmp/shots/demo.png 2>/dev/null \
             || true
           ls -l /tmp/shots/demo.png
+          # Open the Samsung-style Settings hub (no terminal) and capture it.
+          xvfb-run -a bash -c 'deposit-settings & sleep 4; scrot -o /tmp/shots/settings_raw.png' || true
+          python3 ci/render_log.py /tmp/shots/settings.log /tmp/shots/settings.png "Deposit OS — Settings (gear)" 2>/dev/null \
+            || cp /tmp/shots/settings_raw.png /tmp/shots/settings.png 2>/dev/null \
+            || true
+          ls -l /tmp/shots/settings.png 2>/dev/null || echo "no settings png"
       - name: publish demo to job summary
         run: |
           echo "### Deposit OS — tool demo (.mlpds + AQA)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "![tool demo](data:image/png;base64,$(base64 -w0 /tmp/shots/demo.png))" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deposit OS — Settings (Samsung-style gear hub)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "![settings](data:image/png;base64,$(base64 -w0 /tmp/shots/settings.png 2>/dev/null))" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sed 's/</\&lt;/g; s/>/\&gt;/g' /tmp/shots/demo.log >> "$GITHUB_STEP_SUMMARY"
@@ -59,7 +76,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tool-demo-screenshot
-          path: /tmp/shots/demo.png
+          path: |
+            /tmp/shots/demo.png
+            /tmp/shots/settings.png
           if-no-files-found: warn
       - name: report failure
         if: failure()
@@ -274,3 +293,62 @@ jobs:
           else
             echo "refusing to remove unexpected key dir: $key_dir"
           fi
+
+  # --------------------------------------------------------------------------
+  # 5) Build the GENERAL-PURPOSE ARM64 OS (kernel + rootfs + UEFI image) and
+  #    smoke-boot it under qemu-system-aarch64. Self-contained; gated behind
+  #    the workflow_dispatch "arm64" input so normal pushes stay within the
+  #    account's concurrent-job cap (x86 pipeline = jobs 1-4).
+  # --------------------------------------------------------------------------
+  build-arm64:
+    name: build + boot ARM64 (general UEFI)
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.inputs.arm64 == 'true' }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: install cross + image + qemu deps
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential bc flex bison libelf-dev libssl-dev wget xz-utils cpio kmod ccache \
+            gcc-aarch64-linux-gnu qemu-user-static binfmt-support debootstrap \
+            sgdisk dosfstools e2fsprogs parted mtools grub-efi-arm64-bin \
+            qemu-system-aarch64 qemu-efi-aarch64
+      - name: build ARM64 OS (kernel + rootfs + UEFI image)
+        run: sudo bash build/build-arm64.sh
+      - name: upload ARM64 image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-arm64.img
+          path: build/output/deposit-arm64.img
+          if-no-files-found: warn
+      - name: smoke-boot ARM64 image (UEFI + GRUB)
+        continue-on-error: true
+        run: |
+          IMG="build/output/deposit-arm64.img"
+          BIOS="/usr/share/qemu-efi-aarch64/QEMU_EFI.fd"
+          [ -f "$BIOS" ] || BIOS="$(ls /usr/share/*/QEMU_EFI.fd 2>/dev/null | head -1)"
+          qemu-system-aarch64 -M virt -cpu max -m 2048 -smp 2 \
+            -drive file="$IMG",if=virtio,format=raw \
+            -bios "$BIOS" -vnc :2 -qmp tcp:127.0.0.1:4446,server,nowait -daemonize
+          sleep 60
+          python3 ci/qmp_screendump.py /tmp/arm64-boot.png 127.0.0.1 4446 || true
+          pkill -f qemu-system-aarch64 || true
+          ls -l /tmp/arm64-boot.png 2>/dev/null || echo "no boot png"
+      - name: publish ARM64 boot to summary
+        if: always()
+        run: |
+          if [ -s /tmp/arm64-boot.png ]; then
+            echo "### Deposit OS — ARM64 UEFI boot (QEMU virt)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "![arm64 boot](data:image/png;base64,$(base64 -w0 /tmp/arm64-boot.png))" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: report failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          { echo "## build-arm64 FAILED (${GITHUB_SHA})"; } > /tmp/err.md
+          python3 ci/report_failure.py

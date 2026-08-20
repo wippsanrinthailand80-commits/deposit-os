@@ -5,10 +5,11 @@
 # This is what makes Deposit OS a *new* OS rather than a respin: the kernel is
 # downloaded from kernel.org and compiled here, not taken from Ubuntu.
 #
-#   ./build-kernel.sh                 # build (expects build deps present)
+#   ./build-kernel.sh                 # build for the host arch
 #   ./build-kernel.sh --deps         # install build dependencies (apt, root)
 #   ./build-kernel.sh --menuconfig   # tweak the config interactively
-#   DEPOSIT_ARCH=x86_64 ./build-kernel.sh
+#   DEPOSIT_ARCH=arm64 ./build-kernel.sh                          # cross-build ARM64
+#   DEPOSIT_ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- ./build-kernel.sh
 #
 # Output: $DEPOSIT_KERNEL_OUT/boot/vmlinuz-<ver>  and  .../boot/initrd (if any)
 # ============================================================================
@@ -64,12 +65,22 @@ fi
 
 cd "$SRC_DIR"
 
-# Cross-compile support: set DEPOSIT_KERNEL_ARCH / CROSS_COMPILE if needed.
-MAKE_VARS=()
-if [[ -n "${DEPOSIT_KERNEL_ARCH:-}" ]]; then
-  MAKE_VARS+=(ARCH="$DEPOSIT_KERNEL_ARCH")
-  if [[ -n "${CROSS_COMPILE:-}" ]]; then MAKE_VARS+=(CROSS_COMPILE="$CROSS_COMPILE"); fi
+# Resolve the kernel arch: DEPOSIT_KERNEL_ARCH wins, else derive from DEPOSIT_ARCH.
+KARCH="${DEPOSIT_KERNEL_ARCH:-}"
+if [[ -z "$KARCH" ]]; then
+  case "${DEPOSIT_ARCH:-$(uname -m)}" in
+    x86_64|amd64) KARCH=x86_64 ;;
+    aarch64|arm64) KARCH=arm64 ;;
+    *) KARCH="$(uname -m)" ;;
+  esac
 fi
+MAKE_VARS=(ARCH="$KARCH")
+# Cross-compile: default the toolchain for arm64 when none is supplied.
+if [[ "$KARCH" == "arm64" && -z "${CROSS_COMPILE:-}" ]]; then
+  CROSS_COMPILE="aarch64-linux-gnu-"
+fi
+if [[ -n "${CROSS_COMPILE:-}" ]]; then MAKE_VARS+=(CROSS_COMPILE="$CROSS_COMPILE"); fi
+echo "[kernel] target arch: $KARCH${CROSS_COMPILE:+ (cross: $CROSS_COMPILE)}"
 
 # --- Configure (start from a tiny kernel, then enable what we need) ----------
 if [[ ! -f .config ]]; then
@@ -84,12 +95,9 @@ if [[ ! -f .config ]]; then
   # real block layer, a filesystem, and serial/console output.
   cat >> .config <<'CFG'
 
-# --- Deposit OS kernel features (bootable on real x86_64 hardware) ---
+# --- Deposit OS kernel features (bootable on real hardware, any arch) ---
 # Core / platform
 CONFIG_SMP=y
-CONFIG_X86_MPPARSE=y
-CONFIG_X86_LOCAL_APIC=y
-CONFIG_X86_IO_APIC=y
 CONFIG_PCI=y
 CONFIG_PCI_MSI=y
 CONFIG_PCI_QUIRKS=y
@@ -97,8 +105,6 @@ CONFIG_PCI_HOTPLUG=y
 CONFIG_ACPI=y
 CONFIG_ACPI_TABLES=y
 CONFIG_ACPI_PROCESSOR=y
-CONFIG_DMI=y
-CONFIG_DMIID=y
 CONFIG_EFI=y
 CONFIG_EFI_STUB=y
 CONFIG_PM=y
@@ -187,21 +193,14 @@ CONFIG_INPUT_KEYBOARD=y
 CONFIG_INPUT_MOUSE=y
 CONFIG_INPUT_EVDEV=y
 CONFIG_SERIO=y
-CONFIG_SERIO_I8042=y
-CONFIG_KEYBOARD_ATKBD=y
-CONFIG_MOUSE_PS2=y
 
 # Graphics + boot screen (framebuffer console + kernel logo)
 CONFIG_DRM=y
 CONFIG_DRM_FBDEV_EMULATION=y
 CONFIG_DRM_SIMPLEDRM=y
-CONFIG_DRM_BOCHS=y
 CONFIG_FB=y
 CONFIG_FB_CORE=y
-CONFIG_FB_VESA=y
 CONFIG_FB_EFI=y
-CONFIG_BOOT_VESA_LFB=y
-CONFIG_VGA_CONSOLE=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y
 CONFIG_LOGO=y
@@ -213,7 +212,6 @@ CONFIG_HW_CONSOLE=y
 # Console / misc / debug
 CONFIG_SERIAL_8250=y
 CONFIG_SERIAL_8250_CONSOLE=y
-CONFIG_SERIAL_8250_PCI=y
 CONFIG_HW_RANDOM=y
 CONFIG_RTC_CLASS=y
 CONFIG_MAGIC_SYSRQ=y
@@ -227,6 +225,29 @@ CONFIG_NLS_DEFAULT="utf8"
 CONFIG_NLS_CODEPAGE_437=y
 CONFIG_NLS_UTF8=y
 CFG
+
+  # Architecture-specific additions (unknown symbols are dropped by olddefconfig).
+  if [[ "$KARCH" == "x86_64" ]]; then
+    cat >> .config <<'X86'
+# --- x86_64 specific ---
+CONFIG_X86_MPPARSE=y
+CONFIG_X86_LOCAL_APIC=y
+CONFIG_X86_IO_APIC=y
+CONFIG_DMI=y
+CONFIG_DMIID=y
+CONFIG_VGA_CONSOLE=y
+CONFIG_FB_VESA=y
+CONFIG_BOOT_VESA_LFB=y
+CONFIG_SERIO_I8042=y
+CONFIG_KEYBOARD_ATKBD=y
+CONFIG_MOUSE_PS2=y
+CONFIG_DRM_BOCHS=y
+CONFIG_SERIAL_8250_PCI=y
+X86
+  elif [[ "$KARCH" == "arm64" ]]; then
+    echo "[kernel] appending ARM64 feature fragment"
+    cat "$SCRIPT_DIR/kernel-fragments/deposit-arm64.cfg" >> .config
+  fi
 
   # Append the broad hardware-support fragment (distro-class driver set).
   cat "$SCRIPT_DIR/kernel-fragments/deposit-broad.cfg" >> .config
@@ -248,7 +269,8 @@ make "${MAKE_VARS[@]}" -j"$DEPOSIT_KERNEL_JOBS"
 # --- Install artefacts -------------------------------------------------------
 mkdir -p "$KOUT/boot"
 cp "$(make "${MAKE_VARS[@]}" -s image_name)" "$KOUT/boot/vmlinuz-$KVER"
-if [[ -f arch/x86/boot/bzImage ]]; then
+# x86 also emits a bzImage at a separate path; prefer it when present.
+if [[ "$KARCH" == "x86_64" && -f arch/x86/boot/bzImage ]]; then
   cp arch/x86/boot/bzImage "$KOUT/boot/vmlinuz-$KVER" 2>/dev/null || true
 fi
 # Modules (if any built)
