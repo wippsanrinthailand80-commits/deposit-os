@@ -180,7 +180,9 @@ chroot "$ROOTFS" /bin/bash -c '
 # Deposit tooling: bottom-right quick menu + AV wrapper (launchable in terminal).
 cp "$REPO_ROOT/tools/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu"
 cp "$REPO_ROOT/tools/deposit-av"        "$ROOTFS/usr/local/bin/deposit-av"
-chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-av"
+cp "$REPO_ROOT/tools/deposit-turbo-fx"  "$ROOTFS/usr/local/bin/deposit-turbo-fx"
+chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-av" \
+         "$ROOTFS/usr/local/bin/deposit-turbo-fx"
 
 # Autostart the quick menu in the XFCE session.
 mkdir -p "$ROOTFS/etc/xdg/autostart"
@@ -189,6 +191,14 @@ cat > "$ROOTFS/etc/xdg/autostart/deposit-quickmenu.desktop" <<'EOF'
 Type=Application
 Name=Deposit Quick Menu
 Exec=deposit-quickmenu
+X-GNOME-Autostart-enabled=true
+EOF
+# Autostart the Turbo transition spinner overlay (reacts to deposit-turbo).
+cat > "$ROOTFS/etc/xdg/autostart/deposit-turbo-fx.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit Turbo FX
+Exec=deposit-turbo-fx
 X-GNOME-Autostart-enabled=true
 EOF
 # Best-effort: enforce shipped AppArmor profiles (no-op if kernel lacks AA).

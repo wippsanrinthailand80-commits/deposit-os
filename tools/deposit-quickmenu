@@ -8,6 +8,7 @@ the XFCE session and can also be launched from a terminal as
 `deposit-quickmenu`.
 """
 import subprocess
+import time
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -78,6 +79,11 @@ def security_status():
     return "\n".join(lines)
 
 
+def turbo_state():
+    r = run("cat /var/lib/deposit-turbo/state 2>/dev/null")
+    return (r.stdout.strip() if r and r.stdout.strip() else "off")
+
+
 class QuickMenu(Gtk.Window):
     def __init__(self):
         super().__init__(title="Deposit Quick")
@@ -112,6 +118,10 @@ class QuickMenu(Gtk.Window):
         self.air.set_active(airplane_on())
         self.air.connect("toggled", self.on_air)
         box.pack_start(self.air, False, False, 0)
+
+        self.turbo = Gtk.Button(label="Turbo: " + ("on" if turbo_state() == "on" else "off"))
+        self.turbo.connect("clicked", self.on_turbo)
+        box.pack_start(self.turbo, False, False, 0)
 
         box.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
                        False, False, 0)
@@ -156,6 +166,12 @@ class QuickMenu(Gtk.Window):
         out = (r.stdout.strip() if r and r.stdout else "scan complete")
         self.sec.set_text(security_status() + "\n" + out)
         btn.set_label("Run AV scan")
+
+    def on_turbo(self, btn):
+        run("deposit-turbo toggle")
+        time.sleep(0.25)
+        s = turbo_state()
+        btn.set_label("Turbo: " + ("on" if s == "on" else "off"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Deposit OS Turbo transition FX — a small centered overlay that reacts to
+Turbo mode (deposit-turbo). Test version.
+
+Behaviour (per spec):
+  * Turbo ON  -> a spinner fades in, spins, then gradually fades away.
+  * Turbo OFF -> it reappears, but does NOT spin (static), then slowly fades.
+State is read from /var/lib/deposit-turbo/state ("on"/"off").
+"""
+import time
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+STATE_FILE = "/var/lib/deposit-turbo/state"
+
+
+def read_state():
+    try:
+        return open(STATE_FILE).read().strip()
+    except Exception:
+        return "off"
+
+
+class TurboFX(Gtk.Window):
+    def __init__(self):
+        super().__init__()
+        self.set_default_size(190, 190)
+        self.set_keep_above(True)
+        self.set_decorated(False)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+        self.set_accept_focus(False)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+        self.set_app_paintable(True)
+
+        css = b"window{background-color:rgba(18,18,26,0.84);border-radius:22px;}"
+        prov = Gtk.CssProvider()
+        prov.load_from_data(css)
+        Gtk.StyleContext.add_provider_for_screen(
+            self.get_screen(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_border_width(26)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_valign(Gtk.Align.CENTER)
+        self.spin = Gtk.Spinner()
+        self.spin.set_size_request(66, 66)
+        box.pack_start(self.spin, False, False, 0)
+        self.lbl = Gtk.Label()
+        self.lbl.set_markup('<b><span size="large" foreground="#ffffff">TURBO</span></b>')
+        box.pack_start(self.lbl, False, False, 0)
+        self.add(box)
+
+        self.set_opacity(0)
+        self.last = read_state()
+        self._fade_src = None
+        self._delay_src = None
+        self.connect("destroy", Gtk.main_quit)
+        self.show_all()
+        self.spin.stop()
+
+        GLib.timeout_add(400, self._poll)
+
+    # -- animation helpers --------------------------------------------------
+    def _cancel(self):
+        for attr in ("_fade_src", "_delay_src"):
+            src = getattr(self, attr, None)
+            if src:
+                GLib.source_remove(src)
+                setattr(self, attr, None)
+
+    def _fade(self, target, dur_ms, after=None):
+        self._cancel()
+        start = self.get_opacity()
+        t0 = time.time()
+
+        def tick():
+            frac = min(1, (time.time() - t0) * 1000 / dur_ms)
+            self.set_opacity(start + (target - start) * frac)
+            if frac >= 1:
+                self._fade_src = None
+                if after:
+                    after()
+                return False
+            return True
+
+        self._fade_src = GLib.timeout_add(30, tick)
+
+    def _show(self):
+        self.show_all()
+
+    def _hide(self):
+        self.hide()
+
+    # -- transitions ---------------------------------------------------------
+    def _on(self):
+        self._cancel()
+        self.spin.start()
+        self.lbl.set_markup('<b><span size="large" foreground="#ffffff">TURBO</span></b>')
+        self.set_opacity(0)
+        self._show()
+        self._fade(1, 350)
+        self._delay_src = GLib.timeout_add(2200, self._fade_out)
+
+    def _off(self):
+        self._cancel()
+        self.spin.stop()  # static: not spinning
+        self.lbl.set_markup('<b><span size="large" foreground="#9aa0b5">TURBO OFF</span></b>')
+        self.set_opacity(0)
+        self._show()
+        self._fade(1, 350)
+        self._delay_src = GLib.timeout_add(1600, self._fade_out)
+
+    def _fade_out(self):
+        self.spin.stop()
+        self._fade(0, 450, after=self._hide)
+
+    # -- state watcher -------------------------------------------------------
+    def _poll(self):
+        s = read_state()
+        if s != self.last:
+            self.last = s
+            if s == "on":
+                self._on()
+            else:
+                self._off()
+        return True
+
+
+if __name__ == "__main__":
+    try:
+        TurboFX()
+        Gtk.main()
+    except Exception as e:
+        print("deposit-turbo-fx:", e)
