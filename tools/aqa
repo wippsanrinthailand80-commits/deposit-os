@@ -23,12 +23,13 @@ VERSION="0.1"
 REPO_RAW="https://raw.githubusercontent.com/wippsanrinthailand80-commits/deposit-os/main"
 APPS_CONF="/etc/deposit/aqa.apps"
 
-# Default app registry (overridable via $APPS_CONF). Format: name|type|url
-# "stream" has no fixed public URL — set AQA_STREAM_URL (or add a line in
-# $APPS_CONF) to point it at your Stream build.
+# Default app registry (overridable via $APPS_CONF). Format: name|type|url[|sha256]
+# The optional 4th field is the expected sha256 of the downloaded file; when
+# present, aqa verifies it and refuses to install on mismatch. "stream" has no
+# fixed public URL — set AQA_STREAM_URL (or add a line in $APPS_CONF).
 DEFAULT_APPS=$(cat <<'EOF'
-chrome|deb|https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-stream|deb|__STREAM_URL__
+chrome|deb|https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb|
+stream|deb|__STREAM_URL__|
 EOF
 )
 
@@ -68,6 +69,12 @@ app_url(){
   [[ "$name" == "stream" && -n "${AQA_STREAM_URL:-}" ]] && url="$AQA_STREAM_URL"
   echo "$url"
 }
+app_sum(){ # expected sha256 for a known app (may be empty)
+  local name="$1" line
+  line="$(app_list | grep -E "^${name}\|")"
+  [[ -z "$line" ]] && return 1
+  echo "$line" | cut -d'|' -f4
+}
 
 install_deb(){
   local f="$1"
@@ -99,8 +106,8 @@ scan_url(){
     if (( DRYRUN )); then log "[dry-run] would fetch+install $f"; continue; fi
     out="$tmp/$(basename "$f")"
     download "$f" "$out" || { log "download failed: $f"; continue; }
-    case "$out" in
-      *.deb)  install_deb "$out" ;;
+     case "$out" in
+      *.deb)  log "warn: .deb from $f is not checksum-verified"; install_deb "$out" ;;
       *.mlpds) install_mlpds "$out" ;;
     esac
   done
@@ -121,6 +128,14 @@ install_app(){
       local out="$tmp/$(basename "$url")"
       log "downloading $name ..."
       download "$url" "$out" || die "download failed: $url"
+      # Verify against a registered checksum when one exists.
+      local sum; sum="$(app_sum "$name" 2>/dev/null || true)"
+      if [[ -n "$sum" ]]; then
+        local got; got="$(sha256sum "$out" | cut -d' ' -f1)"
+        [[ "$got" == "$sum" ]] || die "aqa: checksum mismatch for $name (expected $sum, got $got) — refusing"
+      else
+        log "warn: no checksum registered for $name; installing unverified"
+      fi
       install_deb "$out"
       ;;
     *) die "unknown app: $name (try: $(app_list | cut -d'|' -f1 | paste -sd' '))" ;;

@@ -6,9 +6,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   # --------------------------------------------------------------------------
   # 1) Tool + .mlpds unit tests, plus a tool-demo screenshot. Fast, no network.
@@ -130,6 +127,8 @@ jobs:
     name: package .mlpds + live boot
     runs-on: ubuntu-24.04
     needs: [build-kernel, build-rootfs]
+    permissions:
+      contents: write
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4

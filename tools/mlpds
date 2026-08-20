@@ -216,7 +216,7 @@ cmd_install(){
   tar -C "$tmp" -xf "$f"
 
   # verify + locate rootfs
-  local rkind; rkind="$(tar -xOf "$f" manifest.json | grep -o '"kind"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/')"
+  local rkind; rkind="$(tar -xOf "$f" manifest.json | python3 -c "import sys,json;print(json.load(sys.stdin).get('rootfs',{}).get('kind',''))" 2>/dev/null || true)"
   local rf="$tmp/rootfs"
   if [[ "$rkind" == "squashfs" ]]; then
     command -v unsquashfs >/dev/null || die "install: unsquashfs missing for squashfs rootfs"
@@ -242,15 +242,15 @@ cmd_install(){
     else
       actual=""   # type has no rootfs payload
     fi
-    if [[ -n "$actual" && -n "$rsum" ]]; then
+    # Verification is MANDATORY: a missing checksum is a refusal, not a warning.
+    # (An attacker could otherwise just omit the field to bypass the check.)
+    if [[ "$rkind" == "squashfs" || "$rkind" == "tree" ]]; then
+      [[ -n "$rsum" ]] || die "install: manifest missing rootfs checksum — refusing to install unverified payload"
       [[ "$actual" == "$rsum" ]] || die "install: rootfs checksum MISMATCH (expected $rsum, got $actual) — refusing to install"
-    elif [[ -n "$actual" && -z "$rsum" ]]; then
-      log "warn: manifest has no rootfs checksum; skipping rootfs verification"
     fi
-    if [[ -n "$isum" ]]; then
-      iactual="$(tar -C "$tmp" -cf - installer | sha256sum | cut -d' ' -f1)"
-      [[ "$iactual" == "$isum" ]] || die "install: installer checksum MISMATCH — refusing to install"
-    fi
+    [[ -n "$isum" ]] || die "install: manifest missing installer checksum — refusing to install unverified payload"
+    iactual="$(tar -C "$tmp" -cf - installer | sha256sum | cut -d' ' -f1)"
+    [[ "$iactual" == "$isum" ]] || die "install: installer checksum MISMATCH — refusing to install"
     log "integrity verified (rootfs ok, installer ok)"
   }
   verify_integrity
