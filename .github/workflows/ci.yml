@@ -30,6 +30,7 @@ jobs:
         run: sudo bash tests/test_mlpds.sh
       - name: compile-check turbo tray (python)
         run: python3 -m py_compile tools/mlpds-installer/installer/install.sh components/turbo/deposit-tray.py 2>/dev/null || python3 -m py_compile components/turbo/deposit-tray.py
+        python3 -m py_compile tools/deposit-quickmenu tools/deposit-security
       - name: run aqa + turbo tests
         run: sudo bash tests/test_aqa.sh
       - name: tool demo + screenshot

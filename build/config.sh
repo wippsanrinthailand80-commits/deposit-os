@@ -63,7 +63,8 @@ DEPOSIT_LOCALES="${DEPOSIT_LOCALES:-en_US.UTF-8 th_TH.UTF-8}"
 # A browser is intentionally NOT baked in — install Chrome via `aqa install
 # chrome` to keep the base image small for older hardware.
 DEPOSIT_APPS="${DEPOSIT_APPS:-network-manager-gnome pavucontrol pulseaudio \
-  udisks2 xfce4-screenshooter xarchiver gnome-font-viewer}"
+  udisks2 xfce4-screenshooter xarchiver gnome-font-viewer \
+  ibus ibus-libthai im-config}"
 # Services: firewall present but not auto-enabled (so SSH isn't locked out).
 DEPOSIT_SERVICES="${DEPOSIT_SERVICES:-ufw}"
 

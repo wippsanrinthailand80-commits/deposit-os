@@ -168,6 +168,25 @@ chmod +x "$ROOTFS/tmp/deposit-extra.sh"
   chroot "$ROOTFS" /tmp/deposit-extra.sh
   rm -f "$ROOTFS/tmp/deposit-extra.sh"
 
+# --- Stage 5b.5: IBus + Thai input (ROADMAP #1) -------------------------------
+# Fonts already render Thai; this makes it *typeable* via IBus (Super+Space to
+# switch to the Thai engine). Set the IM modules globally and autostart ibus.
+{
+  echo "GTK_IM_MODULE=ibus"
+  echo "QT_IM_MODULE=ibus"
+  echo "XMODIFIERS=@im=ibus"
+  echo "CLUTTER_IM_MODULE=ibus"
+} >> "$ROOTFS/etc/environment"
+printf 'run_im ibus\n' > "$ROOTFS/etc/skel/.xinputrc"
+mkdir -p "$ROOTFS/etc/xdg/autostart"
+cat > "$ROOTFS/etc/xdg/autostart/ibus-daemon.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=IBus
+Exec=ibus-daemon -drx
+X-GNOME-Autostart-enabled=true
+EOF
+
 # --- Stage 5c: quick menu + virus scanner + OS security features ----------
 chroot "$ROOTFS" /bin/bash -c '
   export DEBIAN_FRONTEND=noninteractive
@@ -184,9 +203,11 @@ cp "$REPO_ROOT/tools/deposit-av"            "$ROOTFS/usr/local/bin/deposit-av"
 cp "$REPO_ROOT/tools/deposit-turbo-fx"      "$ROOTFS/usr/local/bin/deposit-turbo-fx"
 cp "$REPO_ROOT/tools/deposit-files"         "$ROOTFS/usr/local/bin/deposit-files"
 cp "$REPO_ROOT/tools/deposit-install"       "$ROOTFS/usr/local/bin/deposit-install"
+cp "$REPO_ROOT/tools/deposit-security"      "$ROOTFS/usr/local/bin/deposit-security"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
-         "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install"
+         "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \
+         "$ROOTFS/usr/local/bin/deposit-security"
 
 # Desktop entry for the file manager.
 mkdir -p "$ROOTFS/usr/share/applications"

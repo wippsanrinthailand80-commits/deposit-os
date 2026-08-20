@@ -190,12 +190,16 @@ class QuickMenu(Gtk.Window):
         self.t_files = Gtk.Button(label="Files")
         self.t_files.get_style_context().add_class("tile")
         self.t_files.connect("clicked", lambda w: run("deposit-files &"))
+        self.t_power = self._tile("Power", False, self.on_power)
+        self.t_sec = self._tile("Security", False, self.on_security)
         grid.attach(self.t_wifi, 0, 0, 1, 1)
         grid.attach(self.t_air, 1, 0, 1, 1)
         grid.attach(self.t_turbo, 0, 1, 1, 1)
         grid.attach(self.t_lan, 1, 1, 1, 1)
         grid.attach(self.t_scan, 0, 2, 1, 1)
         grid.attach(self.t_files, 1, 2, 1, 1)
+        grid.attach(self.t_power, 0, 3, 1, 1)
+        grid.attach(self.t_sec, 1, 3, 1, 1)
         box.pack_start(grid, False, False, 0)
 
         # brightness
@@ -310,6 +314,28 @@ class QuickMenu(Gtk.Window):
         out = (r.stdout.strip() if r and r.stdout else "scan complete")
         self.sec.set_text(security_status() + "\n" + out)
         btn.set_label("Scan")
+
+    def on_security(self, btn):
+        run("deposit-security &")
+
+    def on_power(self, btn):
+        d = Gtk.Dialog(title="Power", parent=self,
+                       flags=Gtk.DialogFlags.MODAL)
+        d.set_decorated(False)
+        d.set_keep_above(True)
+        d.add_buttons("Shutdown", 1, "Restart", 2, "Suspend", 3,
+                      "Logout", 4, "Cancel", Gtk.ResponseType.CANCEL)
+        resp = d.run()
+        d.destroy()
+        if resp == 1:
+            run("systemctl poweroff")
+        elif resp == 2:
+            run("systemctl reboot")
+        elif resp == 3:
+            run("systemctl suspend")
+        elif resp == 4:
+            run('xfce4-session-logout --logout 2>/dev/null || '
+                'loginctl terminate-user "$(id -un)"')
 
 
 def _sig_toggle(signum, frame):
