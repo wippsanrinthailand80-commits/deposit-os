@@ -39,6 +39,21 @@ prioritized wish-list so we do not forget the gaps.
    via `aqa`). A desktop OS basically needs one (Firefox-ESR / Chromium, ~100 MB+).
 9. **Bluetooth** — currently masked off in the image; enable if desired.
 
+## ARM64 (parallel build target)
+A whole separate architecture, not a tweak. The app layer (bash/Python/GTK
+tools) is architecture-agnostic and reuses directly; the build pipeline needs
+a second target:
+- Cross-compile (or natively build) a `6.6.58` **arm64** kernel.
+- `debootstrap --arch=arm64` Noble rootfs (reuse `build-rootfs.sh` with `ARCH=arm64`).
+- Boot: `grub-efi-arm64` + UEFI — works on UEFI-capable ARM boards
+  (Raspberry Pi 4/5 with UEFI firmware, Ampere, QEMU `virt`). BIOS/`grub-pc`
+  does not apply; `deposit-install` already handles the UEFI path.
+- Separate `arm64` CI job (kernel cache keyed per-arch) and a distinct
+  `deposit-os-arm64.iso` artifact + release asset.
+
+Sequencing: ship x86_64 first (release + quick wins), **then** add ARM64 as a
+parallel target. Do not block the x86_64 release on it.
+
 ## Recommended next slice
 Ship the three quick wins (Thai typing + power tile + security center) — they are
 small, on-theme, and finish what is already started. Defer OOBE / App Store /
