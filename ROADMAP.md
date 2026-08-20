@@ -8,36 +8,37 @@ prioritized wish-list so we do not forget the gaps.
 - Custom 6.6.58 kernel + debootstrapped Ubuntu Noble userspace (glibc, systemd).
 - Runs `.deb`/`apt` **and** our own `.mlpds` packages (AQA installer).
 - **Turbo** mode + `deposit-turbo-fx` fade-in/out spinner overlay.
-- **Thai**: fonts + `th_TH.UTF-8` locale (renders, but cannot yet *type* Thai).
-- **Security**: AppArmor, ClamAV (`deposit-av`), `ufw` service.
+- **Thai**: fonts, `th_TH.UTF-8` locale, **and** IBus typing (`ibus-libthai`, Super+Space).
+- **Security**: AppArmor, ClamAV (`deposit-av`), `ufw` service, `deposit-security` panel.
 - **Samsung-style quick menu** (`deposit-quickmenu`, Super+Q toggle) with
-  Wi-Fi / Airplane / Turbo / LAN tiles, Brightness + Volume sliders, Scan + Files.
+  Wi-Fi / Airplane / Turbo / LAN / Scan / Files / **Power** / **Security** /
+  **Store** / **Updates** tiles, Brightness + Volume sliders.
 - **Drive file manager** `deposit-files` (C:/D: drive letters).
+- **First-boot OOBE wizard** `deposit-oobe` (timezone, locale, keyboard, password).
+- **Software Center** `deposit-store` (browse/install AQA apps).
+- **Updater** `deposit-updater` (apt + AQA update check/upgrade).
+- **Plymouth boot splash** (spinner theme) + branded wallpaper.
+- **Default browser**: Firefox-ESR baked into the image.
+- **Bluetooth** enabled (bluez) instead of masked off.
 - Hybrid **BIOS/UEFI live ISO** + **USB installer** `deposit-install`
   (GPT partition, rsync, GRUB for BIOS + UEFI).
-- `continuous` GitHub release (intended to carry `deposit-os.iso` + `deposit.os.mlpds`).
+- `continuous` GitHub release (carries `deposit-os.iso` + `deposit.os.mlpds`).
 - README / LICENSE (GPL-3.0) / CONTRIBUTING / issue templates / docs/assets screenshots.
 
-## Quick wins (small effort, high payoff)
-1. **Thai input method** — add `ibus-libthai` and autostart IBus so Thai is
-   both readable *and* typeable. Completes the stated "Thai" requirement.
-2. **Power / session tile** in the quick menu — shutdown, restart, suspend,
-   logout. A Samsung-style menu without power controls feels unfinished.
-3. **Security Center tile** — one panel tying together AppArmor status,
-   `ufw` on/off, and "Run AV scan" (we already have the pieces).
+## Quick wins (small effort, high payoff) — DONE
+1. ✅ **Thai input method** — `ibus-libthai` + IBus autostart (Super+Space).
+2. ✅ **Power / session tile** — shutdown, restart, suspend, logout dialog.
+3. ✅ **Security Center tile** — AppArmor status, `ufw` toggle, "Run AV scan".
 
-## Medium (the "this is a real OS" feeling)
-4. **First-boot OOBE wizard** — language, keyboard, timezone, create your user,
-   opt into updates. Today there is a single hardcoded `deposit`/`deposit` account.
-5. **Software Center for `.mlpds`** — a graphical browser/installer for AQA
-   packages. We built the format; a store makes it tangible.
-6. **Updater / update notifier** — surface `apt` + `.mlpds` updates in the panel.
-7. **Plymouth boot splash + GRUB theme + branded wallpaper** — visual polish.
+## Medium (the "this is a real OS" feeling) — DONE
+4. ✅ **First-boot OOBE wizard** — `deposit-oobe` (timezone/locale/keyboard/password).
+5. ✅ **Software Center for `.mlpds`** — `deposit-store`.
+6. ✅ **Updater / update notifier** — `deposit-updater`.
+7. ✅ **Plymouth boot splash + branded wallpaper** — spinner theme + `splash` boot param.
 
-## Bigger decisions
-8. **Default web browser** — currently *intentionally* omitted (install Chrome
-   via `aqa`). A desktop OS basically needs one (Firefox-ESR / Chromium, ~100 MB+).
-9. **Bluetooth** — currently masked off in the image; enable if desired.
+## Bigger decisions — DONE
+8. ✅ **Default web browser** — Firefox-ESR baked into the image.
+9. ✅ **Bluetooth** — enabled (`bluez`), no longer masked.
 
 ## ARM64 (parallel build target)
 A whole separate architecture, not a tweak. The app layer (bash/Python/GTK
@@ -55,9 +56,9 @@ Sequencing: ship x86_64 first (release + quick wins), **then** add ARM64 as a
 parallel target. Do not block the x86_64 release on it.
 
 ## Recommended next slice
-Ship the three quick wins (Thai typing + power tile + security center) — they are
-small, on-theme, and finish what is already started. Defer OOBE / App Store /
-browser to a later iteration.
+x86_64 road-map (quick wins + medium + browser + Bluetooth) is complete. Next:
+ship/locks the x86_64 `continuous` release, **then** start the **ARM64** parallel
+target (kernel + debootstrap `--arch=arm64` + UEFI boot + arm64 CI job).
 
 ---
 *Note: we are not famous, so this is mostly for ourselves — but writing it down

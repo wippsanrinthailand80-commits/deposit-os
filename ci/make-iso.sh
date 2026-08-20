@@ -65,7 +65,7 @@ cat > "$WORK/boot/grub/grub.cfg" <<EOF
 set timeout=5
 insmod all_video
 menuentry "Deposit OS (Live)" {
-  linux /live/vmlinuz boot=live console=ttyS0,115200n8
+  linux /live/vmlinuz boot=live quiet splash console=ttyS0,115200n8
   initrd /live/initrd.img
 }
 EOF

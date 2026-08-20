@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Deposit Updates — check/apply system + .mlpds updates."""
+import subprocess, gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GLib
+
+CSS = (
+    "window{background-color:rgba(244,244,247,0.98);border-radius:18px;}"
+    ".header{font-size:16px;font-weight:700;} button{border-radius:10px;}"
+)
+
+
+def run(cmd, timeout=600):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return None
+
+
+class Updater(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Deposit Updates")
+        self.set_resizable(False)
+        self.set_keep_above(True)
+        self.set_decorated(False)
+        prov = Gtk.CssProvider()
+        prov.load_from_data(CSS.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            self.get_screen(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_border_width(16)
+        self.add(box)
+        h = Gtk.Label(label="Deposit Updates")
+        h.get_style_context().add_class("header")
+        h.set_xalign(0)
+        box.pack_start(h, False, False, 0)
+        self.status = Gtk.Label(label="Not checked yet.")
+        self.status.set_xalign(0)
+        box.pack_start(self.status, False, False, 0)
+        self.check_btn = Gtk.Button(label="Check for updates")
+        self.check_btn.connect("clicked", self.on_check)
+        box.pack_start(self.check_btn, False, False, 0)
+        self.upg_btn = Gtk.Button(label="Upgrade now")
+        self.upg_btn.connect("clicked", self.on_upgrade)
+        box.pack_start(self.upg_btn, False, False, 0)
+        cl = Gtk.Button(label="Close")
+        cl.connect("clicked", lambda w: self.destroy())
+        box.pack_start(cl, False, False, 0)
+        self.show_all()
+
+    def on_check(self, btn):
+        self.check_btn.set_label("Checking…")
+        self.status.set_text("Refreshing package lists…")
+        GLib.idle_add(self._check)
+
+    def _check(self):
+        run("pkexec apt-get update -qq", timeout=300)
+        r = run("apt list --upgradable 2>/dev/null | grep -c /")
+        n = r.stdout.strip() if (r and r.stdout and r.stdout.strip().isdigit()) else "0"
+        mr = run("aqa list 2>/dev/null")
+        mlpds = sum(1 for l in (mr.stdout or "").splitlines() if "->" in l)
+        self.status.set_text("%s apt package(s) upgradable · %s AQA app(s) available." % (n, mlpds))
+        self.check_btn.set_label("Check for updates")
+        return False
+
+    def on_upgrade(self, btn):
+        self.upg_btn.set_label("Upgrading…")
+        self.status.set_text("Upgrading system packages (root)…")
+        GLib.idle_add(self._upgrade)
+
+    def _upgrade(self):
+        r = run("pkexec apt-get upgrade -y", timeout=900)
+        if r is not None and r.returncode == 0:
+            self.status.set_text("Upgrade finished. Reboot if the kernel changed.")
+        else:
+            self.status.set_text("Upgrade failed or was cancelled.")
+        self.upg_btn.set_label("Upgrade now")
+        return False
+
+
+if __name__ == "__main__":
+    Updater()
+    Gtk.main()

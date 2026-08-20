@@ -60,11 +60,14 @@ DEPOSIT_THAI_FONTS="${DEPOSIT_THAI_FONTS:-fonts-thai-tlwg fonts-noto-color-emoji
 DEPOSIT_LOCALES="${DEPOSIT_LOCALES:-en_US.UTF-8 th_TH.UTF-8}"
 
 # --- Curated "necessary" apps/services for a usable desktop (still light) ----
-# A browser is intentionally NOT baked in — install Chrome via `aqa install
-# chrome` to keep the base image small for older hardware.
+# A default browser (Firefox ESR) IS baked in now; heavy apps like Chrome can
+# still be added later via `aqa install chrome` without bloating the base.
 DEPOSIT_APPS="${DEPOSIT_APPS:-network-manager-gnome pavucontrol pulseaudio \
   udisks2 xfce4-screenshooter xarchiver gnome-font-viewer \
-  ibus ibus-libthai im-config}"
+  ibus ibus-libthai im-config \
+  bluez bluez-tools \
+  plymouth plymouth-themes \
+  firefox-esr}"
 # Services: firewall present but not auto-enabled (so SSH isn't locked out).
 DEPOSIT_SERVICES="${DEPOSIT_SERVICES:-ufw}"
 

@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Deposit Store — minimal software center for .mlpds (AQA) packages."""
+import subprocess, gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GLib
+
+CSS = (
+    "window{background-color:rgba(244,244,247,0.98);border-radius:18px;}"
+    ".header{font-size:16px;font-weight:700;} button{border-radius:10px;}"
+)
+
+
+def run(cmd, timeout=600):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return None
+
+
+def list_apps():
+    r = run("aqa list 2>/dev/null")
+    out = []
+    if r and r.stdout:
+        for line in r.stdout.strip().splitlines():
+            if "->" in line:
+                name = line.split("->")[0].strip()
+                url = line.split("->", 1)[1].strip()
+                out.append((name, url))
+    if not out:
+        out.append(("deposit-demo-app", "https://github.com/wippsanrinthailand80-commits/deposit-os/releases"))
+    return out
+
+
+class Store(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Deposit Store")
+        self.set_keep_above(True)
+        self.set_decorated(False)
+        prov = Gtk.CssProvider()
+        prov.load_from_data(CSS.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            self.get_screen(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(16)
+        self.add(box)
+        h = Gtk.Label(label="Deposit Store")
+        h.get_style_context().add_class("header")
+        h.set_xalign(0)
+        box.pack_start(h, False, False, 0)
+        self.status = Gtk.Label(label="Apps from the AQA registry. Click Install to fetch.")
+        self.status.set_xalign(0)
+        box.pack_start(self.status, False, False, 0)
+        for name, url in list_apps():
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            lbl = Gtk.Label(label=name)
+            lbl.set_xalign(0)
+            lbl.set_tooltip_text(url)
+            btn = Gtk.Button(label="Install")
+            btn.connect("clicked", lambda w, n=name: self.on_install(w, n))
+            row.pack_start(lbl, True, True, 0)
+            row.pack_start(btn, False, False, 0)
+            box.pack_start(row, False, False, 0)
+        cl = Gtk.Button(label="Close")
+        cl.connect("clicked", lambda w: self.destroy())
+        box.pack_start(cl, False, False, 0)
+        self.show_all()
+
+    def on_install(self, btn, name):
+        btn.set_label("Installing…")
+        btn.set_sensitive(False)
+        GLib.idle_add(lambda: self._install(btn, name))
+
+    def _install(self, btn, name):
+        r = run("aqa install %s" % name)
+        if r is not None and r.returncode == 0:
+            btn.set_label("Installed ✓")
+            self.status.set_text("%s installed." % name)
+        else:
+            btn.set_label("Retry")
+            btn.set_sensitive(True)
+            self.status.set_text("Failed to install %s (need network)." % name)
+        return False
+
+
+if __name__ == "__main__":
+    Store()
+    Gtk.main()

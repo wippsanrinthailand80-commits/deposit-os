@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Deposit OOBE — first-boot setup wizard (runs once, skipped on live ISO)."""
+import os, subprocess, gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GLib
+
+SENTINEL = "/var/lib/deposit/oobe-done"
+LIVE = "boot=live" in open("/proc/cmdline").read()
+
+
+def run(cmd, timeout=180):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return None
+
+
+def pkexec(cmd):
+    return run("pkexec sh -c %s" % repr(cmd), timeout=300)
+
+
+class OOBE(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Welcome to Deposit OS")
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_decorated(False)
+        self.set_keep_above(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_border_width(20)
+        self.add(box)
+        box.pack_start(Gtk.Label(label="Welcome to Deposit OS"), False, False, 0)
+        box.pack_start(Gtk.Label(label="Finish setup now — you can change these later."), False, False, 0)
+        self.tz = Gtk.Entry(); self.tz.set_text("UTC")
+        self._row(box, "Timezone", self.tz)
+        self.loc = Gtk.Entry(); self.loc.set_text("en_US.UTF-8")
+        self._row(box, "Language (locale)", self.loc)
+        self.kb = Gtk.Entry(); self.kb.set_text("us")
+        self._row(box, "Keyboard layout", self.kb)
+        self.pw = Gtk.Entry(); self.pw.set_visibility(False)
+        self._row(box, "New password", self.pw)
+        self.pw2 = Gtk.Entry(); self.pw2.set_visibility(False)
+        self._row(box, "Confirm password", self.pw2)
+        fin = Gtk.Button(label="Finish")
+        fin.connect("clicked", self.on_finish)
+        box.pack_start(fin, False, False, 0)
+        self.status = Gtk.Label(label="")
+        box.pack_start(self.status, False, False, 0)
+        self.show_all()
+
+    def _row(self, box, label, widget):
+        r = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        l = Gtk.Label(label=label); l.set_xalign(0)
+        r.pack_start(l, False, False, 0)
+        r.pack_start(widget, True, True, 0)
+        box.pack_start(r, False, False, 0)
+
+    def on_finish(self, btn):
+        if self.pw.get_text() != self.pw2.get_text():
+            self.status.set_text("Passwords do not match.")
+            return
+        btn.set_label("Applying…")
+        GLib.idle_add(self._apply)
+
+    def _apply(self):
+        tz = self.tz.get_text() or "UTC"
+        loc = self.loc.get_text() or "en_US.UTF-8"
+        kb = self.kb.get_text() or "us"
+        pw = self.pw.get_text()
+        script = (
+            "timedatectl set-timezone '%s' 2>/dev/null || true; "
+            "echo 'LANG=%s' > /etc/default/locale; "
+            "locale-gen '%s' 2>/dev/null || true; "
+            "sed -i 's/^XKBLAYOUT=.*/XKBLAYOUT=\"%s\"/' /etc/default/keyboard 2>/dev/null || "
+            "echo 'XKBLAYOUT=\"%s\"' >> /etc/default/keyboard; "
+            "echo 'deposit:%s' | chpasswd; "
+        ) % (tz, loc, loc, kb, kb, pw)
+        pkexec(script)
+        run("setxkbmap %s 2>/dev/null || true" % kb)
+        os.makedirs("/var/lib/deposit", exist_ok=True)
+        open(SENTINEL, "w").close()
+        self.status.set_text("Done! You can close this window.")
+        return False
+
+
+if __name__ == "__main__":
+    if LIVE or os.path.exists(SENTINEL):
+        import sys
+        sys.exit(0)
+    OOBE()
+    Gtk.main()

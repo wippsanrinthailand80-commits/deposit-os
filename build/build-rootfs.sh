@@ -103,7 +103,7 @@ chroot "$ROOTFS" /bin/bash -c '
   set -e
   systemctl set-default multi-user.target 2>/dev/null || true
   # Disable heavy/unneeded units on older hardware (mirrors dietpex philosophy).
-  for u in snapd.service bluetooth.service cups.service cups-browsed.service \
+  for u in snapd.service cups.service cups-browsed.service \
            ModemManager.service whoopsie.service apport.service kerneloops.service \
            apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service \
            fwupd.service avahi-daemon.service; do
@@ -204,10 +204,14 @@ cp "$REPO_ROOT/tools/deposit-turbo-fx"      "$ROOTFS/usr/local/bin/deposit-turbo
 cp "$REPO_ROOT/tools/deposit-files"         "$ROOTFS/usr/local/bin/deposit-files"
 cp "$REPO_ROOT/tools/deposit-install"       "$ROOTFS/usr/local/bin/deposit-install"
 cp "$REPO_ROOT/tools/deposit-security"      "$ROOTFS/usr/local/bin/deposit-security"
+cp "$REPO_ROOT/tools/deposit-updater"       "$ROOTFS/usr/local/bin/deposit-updater"
+cp "$REPO_ROOT/tools/deposit-store"         "$ROOTFS/usr/local/bin/deposit-store"
+cp "$REPO_ROOT/tools/deposit-oobe"          "$ROOTFS/usr/local/bin/deposit-oobe"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
          "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \
-         "$ROOTFS/usr/local/bin/deposit-security"
+         "$ROOTFS/usr/local/bin/deposit-security" "$ROOTFS/usr/local/bin/deposit-updater" \
+         "$ROOTFS/usr/local/bin/deposit-store" "$ROOTFS/usr/local/bin/deposit-oobe"
 
 # Desktop entry for the file manager.
 mkdir -p "$ROOTFS/usr/share/applications"
@@ -218,6 +222,24 @@ Name=Deposit Files
 Exec=deposit-files
 Terminal=false
 Categories=System;FileTools;
+EOF
+
+# Desktop entries for the Store + Updates tools.
+cat > "$ROOTFS/usr/share/applications/deposit-store.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit Store
+Exec=deposit-store
+Terminal=false
+Categories=System;PackageManager;
+EOF
+cat > "$ROOTFS/usr/share/applications/deposit-updater.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit Updates
+Exec=deposit-updater
+Terminal=false
+Categories=System;PackageManager;
 EOF
 
 # Desktop entry for the OS installer (used from the live ISO).
@@ -249,6 +271,16 @@ cat > "$ROOTFS/etc/xdg/autostart/deposit-turbo-fx.desktop" <<'EOF'
 Type=Application
 Name=Deposit Turbo FX
 Exec=deposit-turbo-fx
+X-GNOME-Autostart-enabled=true
+EOF
+
+# Autostart the first-boot OOBE wizard (it self-skips on the live ISO and once
+# the sentinel /var/lib/deposit/oobe-done exists).
+cat > "$ROOTFS/etc/xdg/autostart/deposit-oobe.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit First Boot Setup
+Exec=deposit-oobe
 X-GNOME-Autostart-enabled=true
 EOF
 
@@ -311,12 +343,20 @@ cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/pixmaps/deposit-logo.
 cp "$REPO_ROOT/assets/deposit-turbo.svg" "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
 cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
 
+# Plymouth boot splash theme (ROADMAP #7). Sets the theme so the initramfs built
+# later in make-iso picks it up; `splash` is added to the boot cmdline there.
+chroot "$ROOTFS" /bin/bash -c 'plymouth-set-default-theme spinner 2>/dev/null || true' || true
+# Ensure a framebuffer is available in the initramfs for the splash.
+mkdir -p "$ROOTFS/etc/initramfs-tools/conf.d"
+echo "FRAMEBUFFER=y" > "$ROOTFS/etc/initramfs-tools/conf.d/splash"
+
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
 # This is what makes "boot the OS" land on the Deposit OS desktop.
 chroot "$ROOTFS" /bin/bash -c '
   set -e
   systemctl set-default graphical.target 2>/dev/null || true
   systemctl enable lightdm 2>/dev/null || true
+  systemctl enable bluetooth 2>/dev/null || true
 '
 mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
 cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-deposit-autologin.conf" <<EOF
