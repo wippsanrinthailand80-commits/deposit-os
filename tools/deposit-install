@@ -21,12 +21,21 @@ fi
 [[ -b "$TARGET" ]] || { echo "deposit-install: '$TARGET' is not a block device"; exit 2; }
 
 # --- refuse to wipe the disk this system is currently running from ---------
+# Resolve the running root all the way up to its physical disk (walking the
+# PKNAME chain handles LVM / nested partition tables), then refuse if TARGET is
+# that disk or any of its partitions. On the live ISO the root is the read-only
+# media, so this still allows installing to the internal disk.
 ROOT_SRC="$(findmnt -n -o SOURCE / 2>/dev/null)"
-if [[ "$ROOT_SRC" == /dev/* ]]; then
-  ROOT_DISK="$(lsblk -n -o PKNAME "$ROOT_SRC" 2>/dev/null | head -1)"
-  [[ -z "$ROOT_DISK" ]] && ROOT_DISK="$(basename "$ROOT_SRC")"
-  if [[ "/dev/$ROOT_DISK" == "$TARGET" || "$ROOT_SRC" == "$TARGET"* ]]; then
-    echo "deposit-install: refusing — $TARGET is the disk this system is running from."
+if [[ -n "$ROOT_SRC" ]]; then
+  CUR="$ROOT_SRC"
+  while :; do
+    PK="$(lsblk -n -o PKNAME "$CUR" 2>/dev/null | head -1)"
+    [[ -z "$PK" ]] && break
+    CUR="/dev/$PK"
+  done
+  ROOT_DISK="$CUR"
+  if [[ "$TARGET" == "$ROOT_DISK" || "$TARGET" == "$ROOT_DISK"* ]]; then
+    echo "deposit-install: refusing — $TARGET is the disk this system is running from ($ROOT_DISK)."
     exit 4
   fi
 fi
@@ -38,8 +47,19 @@ echo
 echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 echo "  WARNING: this will ERASE ALL DATA on $TARGET and install Deposit OS."
 echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+# Require a real interactive terminal so the destructive confirmation cannot
+# be satisfied by a piped/redirected "yes" (echo yes | deposit-install ...).
+if [[ ! -t 0 ]]; then
+  echo "deposit-install: refusing — confirmation requires an interactive terminal."
+  exit 3
+fi
 read -r -p "Type 'yes' to continue: " CONFIRM
-[[ "$CONFIRM" == "yes" ]] || { echo "deposit-install: aborted."; exit 3; }
+# Exact, case-sensitive match only. Any other input (empty, "YES", "yes ", …)
+# aborts.
+if [[ "$CONFIRM" != "yes" ]]; then
+  echo "deposit-install: aborted."
+  exit 3
+fi
 
 echo "deposit-install: target=$TARGET  kernel=$VER"
 
