@@ -119,7 +119,7 @@ chroot "$ROOTFS" /bin/bash -c '
 # gap: SSH and any other auth are unusable until the user sets their own).
 RPW="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
 chroot "$ROOTFS" /bin/bash -c 'id '"$DEPOSIT_DEFAULT_USER"' >/dev/null 2>&1 || useradd -m -s /bin/bash '"$DEPOSIT_DEFAULT_USER"'
-echo "$DEPOSIT_DEFAULT_USER:$RPW" | chroot "$ROOTFS" chpasswd
+U="$DEPOSIT_DEFAULT_USER" P="$RPW" chroot "$ROOTFS" /bin/bash -c 'echo "$U:$P" | chpasswd'
 chroot "$ROOTFS" /bin/bash -c 'usermod -aG sudo '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true'
 chroot "$ROOTFS" /bin/bash -c 'chage -d 0 '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true'
 echo "[rootfs] user '$DEPOSIT_DEFAULT_USER': random password set, force-change on first login (set it via OOBE)"

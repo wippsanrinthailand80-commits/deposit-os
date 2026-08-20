@@ -196,15 +196,18 @@ JSON
 JSON
 
   # --- GPG signature of the manifest (trust root) -----------------------------
-  # Refuse to produce an UNSIGNED package: an unsigned .mlpds would be accepted
-  # by nobody, so emitting one is pointless and dangerous. The signature filename
-  # is already recorded in the manifest above, so signing it does not alter the
-  # bytes that get verified later.
+  # In release mode (DEPOSIT_RELEASE=1, used by CI) we REFUSE to emit an unsigned
+  # package — a release must be verifiable. In dev mode we warn and continue so
+  # local builds / demos still work; install will then refuse the unsigned file.
+  # The signature filename is already recorded in the manifest above, so signing
+  # it does not alter the bytes that get verified later.
   local sigfile="$tmp/manifest.sig"
   if sign_manifest "$tmp/manifest.json" "$sigfile"; then
     log "manifest GPG-signed"
+  elif [[ "${DEPOSIT_RELEASE:-0}" == "1" ]]; then
+    die "create: could not GPG-sign manifest (no signing key) — refusing to emit an unsigned .mlpds in release mode"
   else
-    die "create: could not GPG-sign manifest (no signing key available) — refusing to emit an unsigned .mlpds"
+    log "WARN: no signing key available — emitting UNSIGNED package (dev only; 'mlpds install' will refuse it)"
   fi
 
   tar -C "$tmp" -cf - --transform='s,^\./,,' --owner=0 --group=0 . | xz -T0 -c > "$out"

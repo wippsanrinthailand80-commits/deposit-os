@@ -160,7 +160,7 @@ jobs:
           echo "release signing key ready ($(wc -l < ci/release-key.asc) lines)"
       - name: create .mlpds
         run: |
-          sudo bash -c 'DEPOSIT_GPG_PRIVATE_FILE="$PWD/ci/release-key.asc" bash tools/mlpds create \
+          sudo bash -c 'DEPOSIT_RELEASE=1 DEPOSIT_GPG_PRIVATE_FILE="$PWD/ci/release-key.asc" bash tools/mlpds create \
             --rootfs build/output/rootfs \
             --kernel build/output/kernel \
             --out deposit.os.mlpds \

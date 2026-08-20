@@ -4,6 +4,19 @@ set +e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 export PATH="$REPO/tools:$PATH"
+
+# Ephemeral signing key so the demo exercises the real GPG trust chain
+# (create signs -> install verifies). Not used for any real release.
+if command -v gpg >/dev/null 2>&1; then
+  KG="$(mktemp -d)"; chmod 700 "$KG"
+  printf '%%no-protection\nKey-Type: eddsa\nKey-Curve: ed25519\nKey-Usage: sign\nName-Real: demo\nName-Email: demo@deposit\nExpire-Date: 0\n%%commit\n' > "$KG/kg"
+  gpg --homedir "$KG" --batch --gen-key "$KG/kg" >/dev/null 2>&1
+  gpg --homedir "$KG" --armor --export-secret-keys demo@deposit > "$KG/sec.asc" 2>/dev/null
+  gpg --homedir "$KG" --armor --export demo@deposit > "$KG/pub.asc" 2>/dev/null
+  export DEPOSIT_GPG_PRIVATE_FILE="$KG/sec.asc"
+  export DEPOSIT_PUBKEY="$KG/pub.asc"
+fi
+
 mkdir -p /tmp/shots
 exec > >(tee /tmp/shots/demo.log) 2>&1
 
