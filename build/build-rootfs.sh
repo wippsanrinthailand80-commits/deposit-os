@@ -183,9 +183,10 @@ cp "$REPO_ROOT/tools/deposit-quickmenu-toggle" "$ROOTFS/usr/local/bin/deposit-qu
 cp "$REPO_ROOT/tools/deposit-av"            "$ROOTFS/usr/local/bin/deposit-av"
 cp "$REPO_ROOT/tools/deposit-turbo-fx"      "$ROOTFS/usr/local/bin/deposit-turbo-fx"
 cp "$REPO_ROOT/tools/deposit-files"         "$ROOTFS/usr/local/bin/deposit-files"
+cp "$REPO_ROOT/tools/deposit-install"       "$ROOTFS/usr/local/bin/deposit-install"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
-         "$ROOTFS/usr/local/bin/deposit-files"
+         "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install"
 
 # Desktop entry for the file manager.
 mkdir -p "$ROOTFS/usr/share/applications"
@@ -197,6 +198,20 @@ Exec=deposit-files
 Terminal=false
 Categories=System;FileTools;
 EOF
+
+# Desktop entry for the OS installer (used from the live ISO).
+cat > "$ROOTFS/usr/share/applications/deposit-install.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install Deposit OS
+Comment=Install Deposit OS to a disk from the live USB
+Exec=pkexec deposit-install /dev/sda
+Terminal=true
+Categories=System;
+EOF
+# Show it on the live user's desktop.
+mkdir -p "$ROOTFS/etc/skel/Desktop"
+cp "$ROOTFS/usr/share/applications/deposit-install.desktop" "$ROOTFS/etc/skel/Desktop/"
 
 # Autostart the quick menu in the XFCE session.
 mkdir -p "$ROOTFS/etc/xdg/autostart"

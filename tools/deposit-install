@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# ============================================================================
+# deposit-install — install the running Deposit OS to a target disk.
+# Designed to run from the live ISO (boot=live). Copies the current system,
+# builds an initramfs, writes fstab and installs GRUB (BIOS + UEFI).
+#
+# Usage:  deposit-install /dev/sdX
+# ============================================================================
+set -uo pipefail
+
+TARGET="${1:-}"
+[ -b "$TARGET" ] || { echo "Usage: deposit-install /dev/sdX"; exit 2; }
+
+VER="$(ls /lib/modules 2>/dev/null | head -1)"
+[ -n "$VER" ] || { echo "deposit-install: no kernel modules found"; exit 1; }
+
+echo "deposit-install: target=$TARGET  kernel=$VER"
+echo "deposit-install: this will ERASE all data on $TARGET. Continue? (5s)"
+sleep 5
+
+# --- partition (GPT: ESP + root) ----------------------------------------------
+parted -s "$TARGET" mklabel gpt
+parted -s "$TARGET" mkpart ESP fat32 1MiB 513MiB
+parted -s "$TARGET" set 1 esp on
+parted -s "$TARGET" mkpart root ext4 513MiB 100%
+partprobe "$TARGET" 2>/dev/null || true
+sleep 2
+
+RP="${TARGET}2"
+EP="${TARGET}1"
+mkfs.fat -F32 "$EP" >/dev/null
+mkfs.ext4 -F "$RP" >/dev/null
+
+mkdir -p /mnt/droot
+mount "$RP" /mnt/droot
+mkdir -p /mnt/droot/boot/efi
+mount "$EP" /mnt/droot/boot/efi
+
+# --- copy the running system (exclude virtual filesystems) -------------------
+echo "deposit-install: copying files…"
+rsync -aAX --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run \
+  --exclude=/tmp --exclude=/mnt --exclude=/media --exclude=/live \
+  --exclude=/lost+found / /mnt/droot/
+
+# --- initramfs for the installed kernel --------------------------------------
+echo "deposit-install: building initramfs…"
+chroot /mnt/droot update-initramfs -k "$VER" -c 2>/dev/null \
+  || chroot /mnt/droot mkinitramfs -o "/boot/initrd.img-$VER" "$VER"
+
+# --- fstab -------------------------------------------------------------------
+ROOT_UUID="$(blkid -s UUID -o value "$RP")"
+EFI_UUID="$(blkid -s UUID -o value "$EP")"
+cat > /mnt/droot/etc/fstab <<EOF
+UUID=$ROOT_UUID / ext4 errors=remount-ro 0 1
+UUID=$EFI_UUID /boot/efi vfat umask=0077 0 2
+EOF
+
+# --- bootloader --------------------------------------------------------------
+echo "deposit-install: installing GRUB…"
+chroot /mnt/droot grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+  --bootloader-id=deposit --removable 2>/dev/null || true
+chroot /mnt/droot grub-install --target=i386-pc "$TARGET" 2>/dev/null || true
+chroot /mnt/droot update-grub 2>/dev/null || true
+
+echo "deposit" > /mnt/droot/etc/hostname
+
+sync
+umount /mnt/droot/boot/efi 2>/dev/null || true
+umount /mnt/droot 2>/dev/null || true
+echo "deposit-install: done. Remove the USB stick and reboot into $TARGET."

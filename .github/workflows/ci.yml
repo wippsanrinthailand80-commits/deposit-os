@@ -198,7 +198,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xorriso grub-efi-amd64-bin grub-pc-bin squashfs-tools initramfs-tools
+            xorriso mtools grub-efi-amd64-bin grub-pc-bin squashfs-tools initramfs-tools
       - name: build bootable ISO
         continue-on-error: true
         run: sudo bash ci/make-iso.sh build/output/rootfs build/output/kernel build/output/deposit-os.iso
@@ -222,4 +222,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN: ${{ github.run_id }}
-        run: bash ci/publish-release.sh
+        run: bash ci/publish-release.sh build/output/deposit-os.iso deposit.os.mlpds

@@ -74,6 +74,27 @@ Boot the ISO:
 qemu-system-x86_64 -m 2048 -smp 2 -cpu max -cdrom build/output/deposit-os.iso -boot d
 ```
 
+## Install to a disk (USB)
+
+The ISO is a **live + installer** image. To put Deposit OS on real hardware:
+
+1. Write the ISO to a USB stick (replace `sdX` with your stick):
+   ```bash
+   sudo dd if=build/output/deposit-os.iso of=/dev/sdX bs=4M status=progress; sync
+   ```
+2. Boot from the USB stick.
+3. From the live desktop, double-click **Install Deposit OS** (or run
+   `sudo deposit-install /dev/sda` in a terminal). It GPT-partitions the disk
+   (ESP + ext4 root), copies the system, builds an initramfs, writes `/etc/fstab`
+   and installs GRUB for both BIOS and UEFI.
+4. Reboot into the installed disk.
+
+## Releases
+
+Each successful CI run publishes a rolling **continuous** GitHub Release that
+attaches the bootable `deposit-os.iso` and the `deposit.os.mlpds` package. The
+same artifacts are also uploaded to the workflow run.
+
 ## Package management quick reference
 
 ```bash

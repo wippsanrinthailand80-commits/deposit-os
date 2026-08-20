@@ -42,7 +42,9 @@ chroot "$ROOTFS" /bin/bash -c '
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y --no-install-recommends live-boot live-tools \
-    initramfs-tools squashfs-tools || echo "[iso] WARN: live pkg install issue"
+    initramfs-tools squashfs-tools rsync parted dosfstools \
+    grub-efi-amd64 grub-pc os-prober \
+    || echo "[iso] WARN: live pkg install issue"
   mkinitramfs -o "/boot/initrd.img-$VER" "$VER" || echo "[iso] WARN: mkinitramfs issue"
 '
 umount_chroot
@@ -63,7 +65,7 @@ cat > "$WORK/boot/grub/grub.cfg" <<EOF
 set timeout=5
 insmod all_video
 menuentry "Deposit OS (Live)" {
-  linux /live/vmlinuz boot=live
+  linux /live/vmlinuz boot=live console=ttyS0,115200n8
   initrd /live/initrd.img
 }
 EOF

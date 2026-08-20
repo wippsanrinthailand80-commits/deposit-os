@@ -33,4 +33,13 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"$ISO" \
   "$API/releases/$REL_ID/assets?name=deposit-os.iso" >/dev/null
+# also publish the .mlpds package if present
+MLPDS="${2:-deposit.os.mlpds}"
+if [ -f "$MLPDS" ]; then
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary @"$MLPDS" \
+    "$API/releases/$REL_ID/assets?name=deposit.os.mlpds" >/dev/null
+  echo "[release] attached $MLPDS"
+fi
 echo "[release] published ISO to continuous release (id $REL_ID)"
