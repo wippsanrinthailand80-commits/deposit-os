@@ -5,9 +5,9 @@
 # boots on anything that speaks ARM64 UEFI:
 #   * QEMU  -M virt   (qemu-system-aarch64 -drive file=...,if=virtio)
 #   * Raspberry Pi 4/5 (UEFI firmware)
-#   * Rockchip / Snapdragon X / NVIDIA DGX Spark (standard UEFI boxes)
+#   * Rockchip / Snapdragon X / NVIDIA DGX Spark / Apple Silicon (Asahi boot)
 #
-# It is intentionally board-agnostic: no Raspberry-specific DT or bootloader;
+# It is intentionally board-agnostic: no board-specific DT or bootloader;
 # GRUB arm64-efi + ACPI does the right thing on all of the above.
 #
 # Usage: $0 <rootfs> <kernel-dir> <out.img> [size_MB]
@@ -27,16 +27,20 @@ CROSS=0
 [[ "$(uname -m)" != "aarch64" ]] && CROSS=1
 
 # On a non-ARM host we need qemu-user-static so we can chroot the arm64 root
-# to install + run GRUB.
+# to install + run GRUB and build the initramfs.
 if (( CROSS )); then
   QEMU_STATIC="$(command -v "qemu-${QA}-static" 2>/dev/null || true)"
   if [[ -z "$QEMU_STATIC" ]]; then
     apt-get update -qq 2>/dev/null; apt-get install -y -qq qemu-user-static binfmt-support 2>/dev/null || true
     QEMU_STATIC="$(command -v "qemu-${QA}-static" 2>/dev/null || true)"
   fi
+  [[ -d /proc/sys/fs/binfmt_misc ]] || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
   [[ -e /proc/sys/fs/binfmt_misc/qemu-"$QA" ]] || update-binfmts --enable "qemu-$QA" 2>/dev/null || systemctl restart systemd-binfmt 2>/dev/null || true
   [[ -n "$QEMU_STATIC" ]] && cp "$QEMU_STATIC" "$ROOTFS/usr/bin/" 2>/dev/null || true
 fi
+
+VER="$(ls "$KERNEL"/lib/modules 2>/dev/null | head -1)"
+echo "[arm64-img] kernel version: ${VER:-<none>}"
 
 echo "[arm64-img] creating $OUT (${SIZE} MB)"
 rm -f "$OUT"
@@ -62,14 +66,23 @@ mount "$ESP" "$TMP/boot/efi"
 echo "[arm64-img] copying rootfs..."
 cp -a "$ROOTFS/." "$TMP/"
 
-echo "[arm64-img] copying kernel + initrd..."
+echo "[arm64-img] copying kernel modules + vmlinuz..."
+if [[ -n "$VER" ]]; then
+  mkdir -p "$TMP/lib/modules"
+  rm -rf "$TMP/lib/modules/$VER"
+  cp -a "$KERNEL/lib/modules/$VER" "$TMP/lib/modules/$VER"
+fi
 VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
 [[ -n "$VMLINUZ" ]] && cp "$VMLINUZ" "$TMP/boot/vmlinuz"
-[[ -f "$KERNEL/boot/initrd" ]] && cp "$KERNEL/boot/initrd" "$TMP/boot/initrd.img"
 
-# Install GRUB (arm64-efi) for a general UEFI boot, running inside the arm64
-# root via qemu-user when on a non-ARM host.
-echo "[arm64-img] installing grub-efi-arm64 + writing ESP..."
+cat > "$TMP/etc/fstab" <<EOF
+PARTLABEL=root  /          ext4  defaults,noatime  0 1
+PARTLABEL=ESP   /boot/efi  vfat  umask=0077        0 2
+EOF
+
+# Install GRUB (arm64-efi) + initramfs tooling and assemble the image,
+# running inside the arm64 root via qemu-user when on a non-ARM host.
+echo "[arm64-img] installing grub-efi-arm64 + initramfs-tools, writing ESP..."
 mount -o bind /dev "$TMP/dev" 2>/dev/null || true
 mount -t proc proc "$TMP/proc" 2>/dev/null || true
 mount -o bind /sys "$TMP/sys" 2>/dev/null || true
@@ -77,7 +90,12 @@ chroot "$TMP" /bin/bash -c '
   set -e
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y --no-install-recommends grub-efi-arm64 linux-base
+  apt-get install -y --no-install-recommends grub-efi-arm64 linux-base initramfs-tools
+  if [ -d /lib/modules/* ]; then
+    VER="$(ls /lib/modules | head -1)"
+    update-initramfs -c -k "$VER" -o /boot/initrd.img 2>/dev/null \
+      || mkinitramfs -o /boot/initrd.img "$VER" 2>/dev/null || echo "[arm64-img] WARN: initramfs build issue"
+  fi
   grub-install --target=arm64-efi --efi-directory=/boot/efi --boot-directory=/boot --removable
 '
 umount "$TMP/dev" 2>/dev/null || true
@@ -96,6 +114,7 @@ EOF
 # Remove the cross-build interpreter so the shipped image stays clean.
 if (( CROSS )); then
   rm -f "$TMP/usr/bin/qemu-${QA}-static" 2>/dev/null || true
+  rm -f "$ROOTFS/usr/bin/qemu-${QA}-static" 2>/dev/null || true
 fi
 
 umount "$TMP/boot/efi" 2>/dev/null || true

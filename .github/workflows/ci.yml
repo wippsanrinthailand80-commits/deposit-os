@@ -304,7 +304,7 @@ jobs:
     name: build + boot ARM64 (general UEFI)
     runs-on: ubuntu-24.04
     if: ${{ github.event.inputs.arm64 == 'true' }}
-    timeout-minutes: 300
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - name: install cross + image + qemu deps
@@ -313,8 +313,12 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev wget xz-utils cpio kmod ccache \
             gcc-aarch64-linux-gnu qemu-user-static binfmt-support debootstrap \
-            gdisk dosfstools e2fsprogs parted mtools grub-efi-arm64-bin \
-            qemu-system-aarch64 qemu-efi-aarch64
+            gdisk dosfstools e2fsprogs parted mtools grub-efi-arm64-bin qemu-system-arm
+          # UEFI firmware for the boot smoke test (package name varies by release).
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qemu-efi-aarch64 2>/dev/null || \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qemu-efi 2>/dev/null || true
       - name: build ARM64 OS (kernel + rootfs + UEFI image)
         run: sudo bash build/build-arm64.sh
       - name: upload ARM64 image
