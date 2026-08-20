@@ -4,32 +4,47 @@
 # Designed to run from the live ISO (boot=live). Copies the current system,
 # builds an initramfs, writes fstab and installs GRUB (BIOS + UEFI).
 #
-# Usage:  deposit-install /dev/sdX
+# Usage:  deposit-install [DEVICE]
+#   If DEVICE is omitted, available disks are listed and you are prompted.
 # ============================================================================
 set -uo pipefail
 
+usage(){ echo "Usage: deposit-install [DEVICE]   (e.g. deposit-install /dev/sda)"; }
+
+# --- choose a target ---------------------------------------------------------
 TARGET="${1:-}"
-[ -b "$TARGET" ] || { echo "Usage: deposit-install /dev/sdX"; exit 2; }
+if [[ -z "$TARGET" ]]; then
+  echo "deposit-install: available disks:"
+  lsblk -d -p -n -o NAME,SIZE,MODEL 2>/dev/null | sed 's/^/  /'
+  read -r -p "Enter the device to INSTALL to (or Ctrl-C to cancel): " TARGET
+fi
+[[ -b "$TARGET" ]] || { echo "deposit-install: '$TARGET' is not a block device"; exit 2; }
 
 VER="$(ls /lib/modules 2>/dev/null | head -1)"
 [ -n "$VER" ] || { echo "deposit-install: no kernel modules found"; exit 1; }
 
+echo
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo "  WARNING: this will ERASE ALL DATA on $TARGET and install Deposit OS."
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+read -r -p "Type 'yes' to continue: " CONFIRM
+[[ "$CONFIRM" == "yes" ]] || { echo "deposit-install: aborted."; exit 3; }
+
 echo "deposit-install: target=$TARGET  kernel=$VER"
-echo "deposit-install: this will ERASE all data on $TARGET. Continue? (5s)"
-sleep 5
 
 # --- partition (GPT: ESP + root) ----------------------------------------------
+echo "deposit-install: partitioning $TARGET…"
 parted -s "$TARGET" mklabel gpt
 parted -s "$TARGET" mkpart ESP fat32 1MiB 513MiB
 parted -s "$TARGET" set 1 esp on
 parted -s "$TARGET" mkpart root ext4 513MiB 100%
-partprobe "$TARGET" 2>/dev/null || true
+partprobe "$TARGET" || true
 sleep 2
 
 RP="${TARGET}2"
 EP="${TARGET}1"
-mkfs.fat -F32 "$EP" >/dev/null
-mkfs.ext4 -F "$RP" >/dev/null
+mkfs.fat -F32 "$EP"
+mkfs.ext4 -F "$RP"
 
 mkdir -p /mnt/droot
 mount "$RP" /mnt/droot
@@ -44,8 +59,9 @@ rsync -aAX --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run \
 
 # --- initramfs for the installed kernel --------------------------------------
 echo "deposit-install: building initramfs…"
-chroot /mnt/droot update-initramfs -k "$VER" -c 2>/dev/null \
-  || chroot /mnt/droot mkinitramfs -o "/boot/initrd.img-$VER" "$VER"
+if ! chroot /mnt/droot update-initramfs -k "$VER" -c; then
+  chroot /mnt/droot mkinitramfs -o "/boot/initrd.img-$VER" "$VER"
+fi
 
 # --- fstab -------------------------------------------------------------------
 ROOT_UUID="$(blkid -s UUID -o value "$RP")"
@@ -58,13 +74,13 @@ EOF
 # --- bootloader --------------------------------------------------------------
 echo "deposit-install: installing GRUB…"
 chroot /mnt/droot grub-install --target=x86_64-efi --efi-directory=/boot/efi \
-  --bootloader-id=deposit --removable 2>/dev/null || true
-chroot /mnt/droot grub-install --target=i386-pc "$TARGET" 2>/dev/null || true
-chroot /mnt/droot update-grub 2>/dev/null || true
+  --bootloader-id=deposit --removable || echo "deposit-install: note: UEFI grub-install failed (continuing)"
+chroot /mnt/droot grub-install --target=i386-pc "$TARGET" || echo "deposit-install: note: BIOS grub-install failed (continuing)"
+chroot /mnt/droot update-grub || echo "deposit-install: note: update-grub failed"
 
 echo "deposit" > /mnt/droot/etc/hostname
 
 sync
-umount /mnt/droot/boot/efi 2>/dev/null || true
-umount /mnt/droot 2>/dev/null || true
+umount /mnt/droot/boot/efi || true
+umount /mnt/droot || true
 echo "deposit-install: done. Remove the USB stick and reboot into $TARGET."

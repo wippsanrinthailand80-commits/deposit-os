@@ -78,7 +78,10 @@ DEPOSIT_INSTALL_KERNEL_IN_ROOTFS="${DEPOSIT_INSTALL_KERNEL_IN_ROOTFS:-0}"
 # --- Default install settings (used by the .mlpds installer) ----------------
 DEPOSIT_DEFAULT_HOSTNAME="${DEPOSIT_DEFAULT_HOSTNAME:-deposit}"
 DEPOSIT_DEFAULT_USER="${DEPOSIT_DEFAULT_USER:-deposit}"
-DEPOSIT_DEFAULT_USER_PASSWORD="${DEPOSIT_DEFAULT_USER_PASSWORD:-deposit}"
+# NOTE: the build does NOT ship this value. build-rootfs.sh generates a RANDOM
+# password and forces a change on first login (chage -d 0); the OOBE wizard sets
+# the real one. This avoids a known/default credential in the shipped image.
+DEPOSIT_DEFAULT_USER_PASSWORD="${DEPOSIT_DEFAULT_USER_PASSWORD:-}"
 DEPOSIT_DEFAULT_LOCALE="${DEPOSIT_DEFAULT_LOCALE:-en_US.UTF-8}"
 DEPOSIT_DEFAULT_TIMEZONE="${DEPOSIT_DEFAULT_TIMEZONE:-UTC}"
 

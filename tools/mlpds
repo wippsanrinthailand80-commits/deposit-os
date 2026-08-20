@@ -25,6 +25,40 @@ INSTALLER_TEMPLATE="$REPO_DIR/tools/mlpds-installer/installer"
 log(){ printf '[mlpds] %s\n' "$*"; }
 die(){ printf '[mlpds][ERR] %s\n' "$*" >&2; exit 1; }
 
+# --- GPG trust chain helpers -------------------------------------------------
+# A .mlpds package is authenticated by a detached GPG signature over its
+# manifest.json. The verifying system trusts the public key shipped in the OS
+# image at /usr/share/deposit/deposit-signing-key.pub.asc (overridable via
+# $DEPOSIT_PUBKEY). The private key lives ONLY in CI (GitHub Actions secret),
+# so a package can only be produced by someone holding it.
+deposit_pubkey(){ echo "${DEPOSIT_PUBKEY:-/usr/share/deposit/deposit-signing-key.pub.asc}"; }
+
+gpg_verify(){ # data sig -> 0 if valid
+  local data="$1" sig="$2" pk rc gh
+  pk="$(deposit_pubkey)"
+  [[ -f "$pk" ]] || { echo "[mlpds] no trusted public key at $pk"; return 1; }
+  command -v gpg >/dev/null 2>&1 || { echo "[mlpds] gpg missing"; return 1; }
+  gh="$(mktemp -d)"
+  gpg --homedir "$gh" --batch --import "$pk" >/dev/null 2>&1 || { rm -rf "$gh"; return 1; }
+  gpg --homedir "$gh" --batch --verify "$sig" "$data" >/dev/null 2>&1
+  rc=$?; rm -rf "$gh"; return $rc
+}
+
+sign_manifest(){ # manifest -> signature file  (returns 0 on success)
+  local mf="$1" out_sig="$2" gh rc keyid
+  gh="$(mktemp -d)"; rc=1
+  if [[ -n "${DEPOSIT_GPG_PRIVATE_FILE:-}" && -f "${DEPOSIT_GPG_PRIVATE_FILE}" ]]; then
+    gpg --homedir "$gh" --batch --import "${DEPOSIT_GPG_PRIVATE_FILE}" >/dev/null 2>&1 || { rm -rf "$gh"; return 1; }
+  fi
+  keyid="${DEPOSIT_GPG_KEY:-}"
+  [[ -z "$keyid" ]] && keyid="$(gpg --homedir "$gh" --list-secret-keys --with-colons 2>/dev/null | awk -F: '/^sec:/{print $5; exit}')"
+  [[ -z "$keyid" ]] && { rm -rf "$gh"; return 1; }
+  if gpg --homedir "$gh" --batch --yes --armor --detach-sign --local-user "$keyid" --output "$out_sig" "$mf" >/dev/null 2>&1; then
+    rc=0
+  fi
+  rm -rf "$gh"; return $rc
+}
+
 [[ -f "$CONFIG_SH" ]] && source "$CONFIG_SH"
 
 usage(){
@@ -156,9 +190,22 @@ JSON
   "kernel": { "version": "$kver", "image": "$kimg", "modules": "$kmods" },
   "rootfs": { "kind": "$rkind", "checksum_sha256": "$sum" },
   "installer": { "checksum_sha256": "$ins_sum" },
+  "signature": "manifest.sig",
   "packages": $pkgs
 }
 JSON
+
+  # --- GPG signature of the manifest (trust root) -----------------------------
+  # Refuse to produce an UNSIGNED package: an unsigned .mlpds would be accepted
+  # by nobody, so emitting one is pointless and dangerous. The signature filename
+  # is already recorded in the manifest above, so signing it does not alter the
+  # bytes that get verified later.
+  local sigfile="$tmp/manifest.sig"
+  if sign_manifest "$tmp/manifest.json" "$sigfile"; then
+    log "manifest GPG-signed"
+  else
+    die "create: could not GPG-sign manifest (no signing key available) — refusing to emit an unsigned .mlpds"
+  fi
 
   tar -C "$tmp" -cf - --transform='s,^\./,,' --owner=0 --group=0 . | xz -T0 -c > "$out"
   log "created $out  (type=$type, rootfs=$rkind, $(du -h "$out" | cut -f1))"
@@ -251,7 +298,20 @@ cmd_install(){
     [[ -n "$isum" ]] || die "install: manifest missing installer checksum — refusing to install unverified payload"
     iactual="$(tar -C "$tmp" -cf - installer | sha256sum | cut -d' ' -f1)"
     [[ "$iactual" == "$isum" ]] || die "install: installer checksum MISMATCH — refusing to install"
-    log "integrity verified (rootfs ok, installer ok)"
+
+    # --- GPG signature (trust root) ---
+    # A checksum proves integrity; a signature proves PROVENANCE. Both are required.
+    local sigfield; sigfield="$(python3 -c "import sys,json;print(json.load(open('$mf')).get('signature',''))" 2>/dev/null || true)"
+    if [[ -z "$sigfield" ]]; then
+      die "install: manifest has NO GPG signature — refusing to install (packages must be signed)"
+    fi
+    if [[ ! -f "$tmp/$sigfield" ]]; then
+      die "install: signature file '$sigfield' missing from package — refusing to install"
+    fi
+    if ! gpg_verify "$mf" "$tmp/$sigfield"; then
+      die "install: GPG signature verification FAILED — refusing to install (untrusted/forged package)"
+    fi
+    log "integrity verified (rootfs ok, installer ok) + GPG signature ok"
   }
   verify_integrity
 

@@ -14,8 +14,15 @@
 # files, and installs them immediately.
 #
 # Options:
-#   --dry-run   show what would happen, download/install nothing
+#   --dry-run      show what would happen, download/install nothing
+#   --no-verify    install code from the internet WITHOUT a checksum/signature
+#                  (dangerous; only for trusted local sources)
 #   --type deb|mlpds   restrict the scan to one file type
+#
+# Security: a known app is only installed if its registered sha256 matches (or
+# you pass --no-verify). A .deb found by scanning an arbitrary URL is REFUSED
+# unless you supply its expected sha256 or pass --no-verify. .mlpds files are
+# verified through the GPG signature on the package.
 # ============================================================================
 set -uo pipefail
 
@@ -25,7 +32,8 @@ APPS_CONF="/etc/deposit/aqa.apps"
 
 # Default app registry (overridable via $APPS_CONF). Format: name|type|url[|sha256]
 # The optional 4th field is the expected sha256 of the downloaded file; when
-# present, aqa verifies it and refuses to install on mismatch. "stream" has no
+# present, aqa verifies it and refuses to install on mismatch; when ABSENT, the
+# app is refused unless --no-verify is given. "stream" has no
 # fixed public URL — set AQA_STREAM_URL (or add a line in $APPS_CONF).
 DEFAULT_APPS=$(cat <<'EOF'
 chrome|deb|https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb|
@@ -36,6 +44,7 @@ EOF
 SUDO=""; [[ "$(id -u)" -eq 0 ]] || SUDO="sudo"
 DRYRUN=0
 RESTRICT=""
+NOVERIFY=0
 
 log(){ echo "aqa: $*"; }
 die(){ echo "aqa: $*" >&2; exit 1; }
@@ -89,8 +98,12 @@ install_mlpds(){
 }
 
 # --- scan a URL for .deb/.mlpds and install --------------------------------
+# $2 (optional) is the expected sha256 of the file(s) found. A .deb from an
+# arbitrary URL is only installed if it matches that checksum OR --no-verify is
+# given; otherwise it is refused (installing code from the internet with no
+# integrity/authenticity check is the most dangerous path in aqa).
 scan_url(){
-  local url="$1" html links tmp f
+  local url="$1" expect="${2:-}" html links tmp f
   log "scanning $url"
   html="$(fetch "$url")" || die "could not fetch $url"
   links="$(echo "$html" | grep -oE 'href="[^"]+\.(deb|mlpds)"' | sed -E 's/href="([^"]+)"/\1/' | sort -u)"
@@ -107,7 +120,22 @@ scan_url(){
     out="$tmp/$(basename "$f")"
     download "$f" "$out" || { log "download failed: $f"; continue; }
      case "$out" in
-      *.deb)  log "warn: .deb from $f is not checksum-verified"; install_deb "$out" ;;
+      *.deb)
+        if [[ -n "$expect" ]]; then
+          local got; got="$(sha256sum "$out" | cut -d' ' -f1)"
+          if [[ "$got" == "$expect" ]]; then
+            log "checksum verified for $f"; install_deb "$out"
+          else
+            log "refusing $f: checksum mismatch (expected $expect, got $got)"
+          fi
+        elif (( NOVERIFY )); then
+          log "WARN: installing unverified .deb from $f (--no-verify)"
+          install_deb "$out"
+        else
+          log "refusing to install unverified .deb from $f"
+          log "  supply the expected sha256, or re-run with --no-verify (not recommended)"
+        fi
+        ;;
       *.mlpds) install_mlpds "$out" ;;
     esac
   done
@@ -133,8 +161,11 @@ install_app(){
       if [[ -n "$sum" ]]; then
         local got; got="$(sha256sum "$out" | cut -d' ' -f1)"
         [[ "$got" == "$sum" ]] || die "aqa: checksum mismatch for $name (expected $sum, got $got) — refusing"
+        log "checksum verified for $name"
+      elif (( NOVERIFY )); then
+        log "WARN: no checksum registered for $name; installing unverified (--no-verify)"
       else
-        log "warn: no checksum registered for $name; installing unverified"
+        die "aqa: no checksum registered for '$name' — refusing to install unverified. Add the sha256 to $APPS_CONF or pass --no-verify (not recommended)"
       fi
       install_deb "$out"
       ;;
@@ -164,6 +195,7 @@ usage(){
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRYRUN=1; shift ;;
+    --no-verify) NOVERIFY=1; shift ;;
     --type)    RESTRICT="${2#.}"; shift 2 ;;
     -h|--help|help) usage; exit 0 ;;
     *) ARGS+=("$1"); shift ;;
@@ -177,7 +209,7 @@ case "$1" in
     shift
     [[ $# -eq 0 ]] && die "install needs an app name (chrome|stream|turbo) or a URL"
     if [[ "$1" == *://* || "$1" == http* || "$1" == ftp* ]]; then
-      scan_url "$1"
+      scan_url "$1" "${2:-}"
     else
       install_app "$1"
     fi

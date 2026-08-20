@@ -114,18 +114,26 @@ chroot "$ROOTFS" /bin/bash -c '
 '
 
 # --- Stage 5: default user --------------------------------------------------
-chroot "$ROOTFS" /bin/bash -c '
-  id '"$DEPOSIT_DEFAULT_USER"' >/dev/null 2>&1 || useradd -m -s /bin/bash '"$DEPOSIT_DEFAULT_USER"'
-  echo "'"$DEPOSIT_DEFAULT_USER"':$DEPOSIT_DEFAULT_USER_PASSWORD" | chpasswd
-  usermod -aG sudo '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true
-'
+# Generate a RANDOM initial password and force a change on first login, so the
+# shipped image never carries a known/default credential (closes the OOBE audit
+# gap: SSH and any other auth are unusable until the user sets their own).
+RPW="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
+chroot "$ROOTFS" /bin/bash -c 'id '"$DEPOSIT_DEFAULT_USER"' >/dev/null 2>&1 || useradd -m -s /bin/bash '"$DEPOSIT_DEFAULT_USER"'
+echo "$DEPOSIT_DEFAULT_USER:$RPW" | chroot "$ROOTFS" chpasswd
+chroot "$ROOTFS" /bin/bash -c 'usermod -aG sudo '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true'
+chroot "$ROOTFS" /bin/bash -c 'chage -d 0 '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true'
+echo "[rootfs] user '$DEPOSIT_DEFAULT_USER': random password set, force-change on first login (set it via OOBE)"
 
 # --- Stage 6: Deposit OS tooling (aqa installer + turbo engine) ------------
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-mkdir -p "$ROOTFS/usr/local/bin" "$ROOTFS/etc/deposit"
+mkdir -p "$ROOTFS/usr/local/bin" "$ROOTFS/etc/deposit" "$ROOTFS/usr/share/deposit"
 cp "$REPO_ROOT/tools/aqa"        "$ROOTFS/usr/local/bin/aqa"
 cp "$REPO_ROOT/tools/deposit-turbo" "$ROOTFS/usr/local/bin/deposit-turbo"
 chmod +x "$ROOTFS/usr/local/bin/aqa" "$ROOTFS/usr/local/bin/deposit-turbo"
+
+# Trusted public key used to verify GPG signatures on .mlpds packages.
+cp "$REPO_ROOT/assets/deposit-signing-key.pub.asc" "$ROOTFS/usr/share/deposit/deposit-signing-key.pub.asc" 2>/dev/null \
+  || echo "WARN: signing public key not found (packages will be unverifiable)"
 
 # Default turbo config (hotkey is configurable here).
 cat > "$ROOTFS/etc/deposit/turbo.conf" <<EOF
@@ -248,7 +256,7 @@ cat > "$ROOTFS/usr/share/applications/deposit-install.desktop" <<'EOF'
 Type=Application
 Name=Install Deposit OS
 Comment=Install Deposit OS to a disk from the live USB
-Exec=pkexec deposit-install /dev/sda
+Exec=pkexec deposit-install
 Terminal=true
 Categories=System;
 EOF

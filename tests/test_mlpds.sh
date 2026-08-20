@@ -35,6 +35,30 @@ Package: apt
 Status: install ok installed
 EOF
 
+# --- ephemeral GPG key for the trust-chain test ----------------------------
+echo "[2b] ephemeral signing key (gpg)"
+if ! command -v gpg >/dev/null 2>&1; then
+  echo "  SKIP: gpg not available — cannot exercise GPG signature chain"; exit 0
+fi
+KG="$WORK/keyhome"; mkdir -p "$KG"; chmod 700 "$KG"
+cat > "$KG/kg" <<'EOF'
+%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Key-Usage: sign
+Name-Real: test
+Name-Email: test@test
+Expire-Date: 0
+%commit
+EOF
+gpg --homedir "$KG" --batch --gen-key "$KG/kg" >/dev/null 2>&1 \
+  && ok "gpg keygen" || bad "gpg keygen"
+gpg --homedir "$KG" --armor --export-secret-keys test@test > "$KG/sec.asc" 2>/dev/null \
+  && gpg --homedir "$KG" --armor --export test@test > "$KG/pub.asc" 2>/dev/null \
+  || bad "export keys"
+export DEPOSIT_GPG_PRIVATE_FILE="$KG/sec.asc"
+export DEPOSIT_PUBKEY="$KG/pub.asc"
+
 # --- create (os) -----------------------------------------------------------
 echo "[3] mlpds create (type=os)"
 OUT="$WORK/deposit.os.mlpds"

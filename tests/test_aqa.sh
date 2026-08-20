@@ -46,6 +46,14 @@ out="$("$AQA" install "file://$WORK/fake.html" --dry-run 2>&1)"
 echo "$out" | grep -q "app.deb" && echo "$out" | grep -q "extra.mlpds" \
   && ok "install <url> scanned deb+mlpds" || bad "install <url> scanned deb+mlpds"
 
+echo "[7b] aqa install <url> refuses unverified .deb (no checksum, no --no-verify)"
+echo "fake-binary" > "$WORK/app.deb"
+cat > "$WORK/idx.html" <<EOF
+<a href="app.deb">deb</a>
+EOF
+out="$("$AQA" install "file://$WORK/idx.html" 2>&1)"; rc=$?
+echo "$out" | grep -qi "refusing" && ok "unverified .deb refused" || bad "unverified .deb refused (rc=$rc out=$out)"
+
 echo "[8] build config has Thai/theme/apps + brand assets exist"
 if source "$REPO/build/config.sh" 2>/dev/null; then
   [[ "${DEPOSIT_ENABLE_THAI:-0}" == "1" ]] && ok "thai enabled" || bad "thai enabled"

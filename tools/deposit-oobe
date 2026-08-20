@@ -58,6 +58,9 @@ class OOBE(Gtk.Window):
         if self.pw.get_text() != self.pw2.get_text():
             self.status.set_text("Passwords do not match.")
             return
+        if not self.pw.get_text():
+            self.status.set_text("Password cannot be empty — set a password.")
+            return
         btn.set_label("Applying…")
         GLib.idle_add(self._apply)
 
