@@ -12,7 +12,7 @@ import time
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 
 
 def run(cmd, timeout=15):
@@ -87,75 +87,89 @@ def turbo_state():
 class QuickMenu(Gtk.Window):
     def __init__(self):
         super().__init__(title="Deposit Quick")
-        self.set_default_size(264, 360)
+        self.set_default_size(240, -1)
         self.set_keep_above(True)
         self.set_skip_taskbar_hint(True)
         self.connect("destroy", Gtk.main_quit)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_border_width(10)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_border_width(14)
         self.add(box)
 
         hdr = Gtk.Label()
-        hdr.set_markup("<b>Deposit OS — Quick</b>")
+        hdr.set_markup('<span size="large"><b>Deposit OS</b></span>')
+        hdr.set_xalign(0)
         box.pack_start(hdr, False, False, 0)
 
-        self.wifi = Gtk.ToggleButton(label="Wi-Fi: on")
-        self.wifi.set_active(wifi_on())
-        self.wifi.connect("toggled", self.on_wifi)
-        box.pack_start(self.wifi, False, False, 0)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row.pack_start(Gtk.Label(label="Brightness"), False, False, 0)
-        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
-        self.scale.set_value(brightness_pct())
-        self.scale.set_size_request(140, -1)
-        self.scale.connect("value-changed", self.on_bright)
-        row.pack_start(self.scale, True, True, 0)
+        self.wifi_sw, row = self._switch_row("Wi-Fi", wifi_on(), self.on_wifi)
+        box.pack_start(row, False, False, 0)
+        self.air_sw, row = self._switch_row("Airplane mode", airplane_on(), self.on_air)
+        box.pack_start(row, False, False, 0)
+        self.turbo_sw, row = self._switch_row("Turbo", turbo_state() == "on", self.on_turbo)
         box.pack_start(row, False, False, 0)
 
-        self.air = Gtk.ToggleButton(label="Airplane mode: off")
-        self.air.set_active(airplane_on())
-        self.air.connect("toggled", self.on_air)
-        box.pack_start(self.air, False, False, 0)
-
-        self.turbo = Gtk.Button(label="Turbo: " + ("on" if turbo_state() == "on" else "off"))
-        self.turbo.connect("clicked", self.on_turbo)
-        box.pack_start(self.turbo, False, False, 0)
+        br = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        br.pack_start(Gtk.Label(label="Brightness"), False, False, 0)
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.scale.set_value(brightness_pct())
+        self.scale.set_size_request(110, -1)
+        self.scale.set_draw_value(False)
+        self.scale.connect("value-changed", self.on_bright)
+        br.pack_start(self.scale, True, True, 0)
+        box.pack_start(br, False, False, 0)
 
         box.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
                        False, False, 0)
+
         sec = Gtk.Label()
         sec.set_markup("<b>Security</b>")
+        sec.set_xalign(0)
         box.pack_start(sec, False, False, 0)
         self.sec = Gtk.Label(label=security_status())
+        self.sec.set_xalign(0)
+        self.sec.set_line_wrap(True)
         box.pack_start(self.sec, False, False, 0)
-        scan = Gtk.Button(label="Run AV scan")
-        scan.connect("clicked", self.on_scan)
-        box.pack_start(scan, False, False, 0)
+        self.scan = Gtk.Button(label="Run AV scan")
+        self.scan.connect("clicked", self.on_scan)
+        box.pack_start(self.scan, False, False, 0)
 
         arm = Gtk.Label()
-        arm.set_markup('<span size="small">ARM build: test only — not yet supported.</span>')
+        arm.set_markup('<span size="small" foreground="#888888">ARM build: test only — not yet supported.</span>')
+        arm.set_xalign(0)
         box.pack_start(arm, False, False, 0)
 
         self.show_all()
-        self.move_bottom_right()
+        GLib.idle_add(self.move_bottom_right)
+
+    def _switch_row(self, label, active, cb):
+        h = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        h.pack_start(Gtk.Label(label=label), False, False, 0)
+        sw = Gtk.Switch()
+        sw.set_active(active)
+        sw.connect("notify::active", cb)
+        h.pack_end(sw, False, False, 0)
+        return sw, h
 
     def move_bottom_right(self):
         try:
             mon = self.get_screen().get_monitor_geometry(0)
-            w, h = 264, 380
+            w, h = self.get_size()
+            if w < 50:
+                w = 240
+            if h < 50:
+                h = 380
             self.move(max(0, mon.width - w - 12), max(0, mon.height - h - 12))
         except Exception:
             self.move(980, 600)
 
-    def on_wifi(self, btn):
-        set_wifi(btn.get_active())
-        btn.set_label("Wi-Fi: " + ("on" if btn.get_active() else "off"))
+    def on_wifi(self, sw, pspec):
+        set_wifi(sw.get_active())
 
-    def on_air(self, btn):
-        set_airplane(btn.get_active())
-        btn.set_label("Airplane mode: " + ("on" if btn.get_active() else "off"))
+    def on_air(self, sw, pspec):
+        set_airplane(sw.get_active())
+
+    def on_turbo(self, sw, pspec):
+        run("deposit-turbo " + ("on" if sw.get_active() else "off"))
 
     def on_bright(self, scale):
         set_brightness(int(scale.get_value()))
@@ -166,12 +180,6 @@ class QuickMenu(Gtk.Window):
         out = (r.stdout.strip() if r and r.stdout else "scan complete")
         self.sec.set_text(security_status() + "\n" + out)
         btn.set_label("Run AV scan")
-
-    def on_turbo(self, btn):
-        run("deposit-turbo toggle")
-        time.sleep(0.25)
-        s = turbo_state()
-        btn.set_label("Turbo: " + ("on" if s == "on" else "off"))
 
 
 if __name__ == "__main__":
