@@ -47,8 +47,17 @@ if (( CROSS )); then
       || echo "WARN: could not install qemu-user-static (cross build may fail)"
     QEMU_STATIC="$(command -v "qemu-${QA}-static" 2>/dev/null || true)"
   fi
+  if [[ ! -d /proc/sys/fs/binfmt_misc ]]; then
+    mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
+  fi
   if [[ ! -e /proc/sys/fs/binfmt_misc/qemu-"$QA" ]]; then
     update-binfmts --enable "qemu-$QA" 2>/dev/null || systemctl restart systemd-binfmt 2>/dev/null || true
+  fi
+  # Last-resort: register the interpreter manually if it is still missing.
+  if [[ ! -e /proc/sys/fs/binfmt_misc/qemu-"$QA" && -n "${QEMU_STATIC:-}" ]]; then
+    echo "[rootfs] manually registering binfmt for qemu-$QA"
+    printf ':qemu-%s:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\xb7\\x00:\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfc\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff:%s:OCF\n' \
+      "$QA" "$QEMU_STATIC" > /proc/sys/fs/binfmt_misc/register 2>/dev/null || true
   fi
 fi
 

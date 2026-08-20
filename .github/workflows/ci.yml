@@ -313,7 +313,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential bc flex bison libelf-dev libssl-dev wget xz-utils cpio kmod ccache \
             gcc-aarch64-linux-gnu qemu-user-static binfmt-support debootstrap \
-            sgdisk dosfstools e2fsprogs parted mtools grub-efi-arm64-bin \
+            gdisk dosfstools e2fsprogs parted mtools grub-efi-arm64-bin \
             qemu-system-aarch64 qemu-efi-aarch64
       - name: build ARM64 OS (kernel + rootfs + UEFI image)
         run: sudo bash build/build-arm64.sh
