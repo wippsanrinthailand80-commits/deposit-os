@@ -83,10 +83,11 @@ The ISO is a **live + installer** image. To put Deposit OS on real hardware:
    sudo dd if=build/output/deposit-os.iso of=/dev/sdX bs=4M status=progress; sync
    ```
 2. Boot from the USB stick.
-3. From the live desktop, double-click **Install Deposit OS** (or run
-   `sudo deposit-install /dev/sda` in a terminal). It GPT-partitions the disk
-   (ESP + ext4 root), copies the system, builds an initramfs, writes `/etc/fstab`
-   and installs GRUB for both BIOS and UEFI.
+ 3. From the live desktop, double-click **Install Deposit OS** (or run
+    `sudo deposit-install /dev/sda` in a terminal). It will ask you to type
+    `yes` to confirm the disk wipe before proceeding. It GPT-partitions the disk
+    (ESP + ext4 root), copies the system, builds an initramfs, writes `/etc/fstab`
+    and installs GRUB for both BIOS and UEFI.
 4. Reboot into the installed disk.
 
 ## Releases
@@ -98,7 +99,9 @@ same artifacts are also uploaded to the workflow run.
 ## Package management quick reference
 
 ```bash
-aqa install <URL>          # install from a .deb or .mlpds URL
+aqa install <URL>          # install from a .deb or .mlpds URL; the URL must end
+                           # in #sha256=<hash> (e.g. http://x/pkg.deb#sha256=abc...)
+                           # or pass --no-verify to skip the integrity check
 aqa install chrome         # install a pre-bundled offline package
 aqa install steam
 aqa install turbo
