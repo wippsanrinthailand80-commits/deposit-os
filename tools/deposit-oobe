@@ -1,22 +1,41 @@
 #!/usr/bin/env python3
 """Deposit OOBE — first-boot setup wizard (runs once, skipped on live ISO)."""
-import os, subprocess, gi
+import os
+import re
+import subprocess
+import gi
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib
 
 SENTINEL = "/var/lib/deposit/oobe-done"
 LIVE = "boot=live" in open("/proc/cmdline").read()
 
+# Allowlist for free-text fields. These are passed as argv/data, never into a
+# shell, but we still constrain them to a safe charset as defense in depth.
+TZ_RE = re.compile(r"^[A-Za-z0-9_./+:-]{1,40}$")
+LOC_RE = re.compile(r"^[A-Za-z0-9_@./-]{1,40}$")
+KB_RE = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
 
-def run(cmd, timeout=180):
+
+def run(cmd, timeout=30):
+    """Run a command given as an argv list (NEVER a shell string)."""
     try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except Exception:
         return None
 
 
-def pkexec(cmd):
-    return run("pkexec sh -c %s" % repr(cmd), timeout=300)
+def pkexec_script(script, args, stdin=None, timeout=300):
+    """Run a *constant* shell script via pkexec, passing untrusted values as
+    positional arguments ($1, $2, ...) so they are never re-parsed by the
+    shell. `stdin` (bytes/str) is forwarded to the script (e.g. for chpasswd)."""
+    try:
+        return subprocess.run(
+            ["pkexec", "sh", "-c", script, "_", *args],
+            input=stdin, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return None
 
 
 class OOBE(Gtk.Window):
@@ -69,16 +88,32 @@ class OOBE(Gtk.Window):
         loc = self.loc.get_text() or "en_US.UTF-8"
         kb = self.kb.get_text() or "us"
         pw = self.pw.get_text()
+        # Constrain to safe charsets (values are still passed as argv/data below).
+        if not TZ_RE.match(tz):
+            tz = "UTC"
+        if not LOC_RE.match(loc):
+            loc = "en_US.UTF-8"
+        if not KB_RE.match(kb):
+            kb = "us"
+        pw = pw.replace("\n", "").replace("\r", "")
+
+        # Constant script; untrusted values ($1 tz, $2 loc, $3 kb) are argv,
+        # and the password is piped via stdin to chpasswd (never parsed by sh).
         script = (
-            "timedatectl set-timezone '%s' 2>/dev/null || true; "
-            "echo 'LANG=%s' > /etc/default/locale; "
-            "locale-gen '%s' 2>/dev/null || true; "
-            "sed -i 's/^XKBLAYOUT=.*/XKBLAYOUT=\"%s\"/' /etc/default/keyboard 2>/dev/null || "
-            "echo 'XKBLAYOUT=\"%s\"' >> /etc/default/keyboard; "
-            "echo 'deposit:%s' | chpasswd; "
-        ) % (tz, loc, loc, kb, kb, pw)
-        pkexec(script)
-        run("setxkbmap %s 2>/dev/null || true" % kb)
+            'timedatectl set-timezone "$1" 2>/dev/null || true; '
+            'printf "LANG=%s\\n" "$2" > /etc/default/locale; '
+            'locale-gen "$2" 2>/dev/null || true; '
+            'if grep -q "^XKBLAYOUT=" /etc/default/keyboard; then '
+            '  sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\\"$3\\"/" /etc/default/keyboard; '
+            'else echo "XKBLAYOUT=\\"$3\\"" >> /etc/default/keyboard; fi; '
+            # First-boot setup is complete: on an installed machine we no longer
+            # want passwordless autologin into a sudo-capable account, so drop the
+            # autologin drop-in (the live ISO skips OOBE, so it keeps autologin).
+            'rm -f /etc/lightdm/lightdm.conf.d/50-deposit-autologin.conf 2>/dev/null || true; '
+            'chpasswd'
+        )
+        pkexec_script(script, [tz, loc, kb], stdin="deposit:%s\n" % pw)
+        run(["setxkbmap", kb])
         os.makedirs("/var/lib/deposit", exist_ok=True)
         open(SENTINEL, "w").close()
         self.status.set_text("Done! You can close this window.")

@@ -11,14 +11,18 @@ CSS = (
 
 
 def run(cmd, timeout=600):
+    """Run an argv list (no shell). String commands are split safely."""
     try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        if isinstance(cmd, str):
+            import shlex
+            cmd = shlex.split(cmd)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except Exception:
         return None
 
 
 def list_apps():
-    r = run("aqa list 2>/dev/null")
+    r = run(["aqa", "list"])
     out = []
     if r and r.stdout:
         for line in r.stdout.strip().splitlines():
@@ -71,7 +75,9 @@ class Store(Gtk.Window):
         GLib.idle_add(lambda: self._install(btn, name))
 
     def _install(self, btn, name):
-        r = run("aqa install %s" % name)
+        # name comes from the trusted AQA registry; passed as a discrete argv
+        # element so it can never be interpreted as shell syntax.
+        r = run(["aqa", "install", name])
         if r is not None and r.returncode == 0:
             btn.set_label("Installed ✓")
             self.status.set_text("%s installed." % name)

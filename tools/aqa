@@ -173,6 +173,16 @@ install_app(){
   esac
 }
 
+# Embedded integrity baseline for the turbo applet components. These are the
+# sha256 of the files in this same repo at this commit, so `aqa install turbo`
+# verifies the downloaded bytes actually match what we ship (prevents a MITM /
+# tampered download from executing `bash install.sh` unverified).
+declare -A TURBO_SUMS=(
+  [deposit-tray.py]=7a8f047344431e8015465d544ee666844e885eb14a7dd0627d9b21acd661d5fb
+  [install.sh]=3daefbeef4d5dd3e91709d436404354b7f777a33e6b38010c0170c34139118c7
+  [deposit-turbo.desktop]=c27ce99f8ec7c2e0c823317162e66c76ba89b641f9dbc894fff1835353d40bf8
+)
+
 # The turbo GUI applet is an optional component (keeps the base image light).
 install_turbo(){
   if (( DRYRUN )); then
@@ -183,6 +193,16 @@ install_turbo(){
   cd "$tmp"
   for f in deposit-tray.py install.sh deposit-turbo.desktop; do
     download "$REPO_RAW/components/turbo/$f" "$f" || die "could not fetch turbo component: $f"
+    local got; got="$(sha256sum "$f" | cut -d' ' -f1)"
+    local exp="${TURBO_SUMS[$f]:-}"
+    if [[ -n "$exp" ]]; then
+      [[ "$got" == "$exp" ]] || die "aqa: turbo component $f checksum mismatch (expected $exp, got $got) — refusing"
+      log "checksum verified for turbo/$f"
+    elif (( NOVERIFY )); then
+      log "WARN: installing unverified turbo component $f (--no-verify)"
+    else
+      die "aqa: no checksum registered for turbo/$f — refusing to install unverified. Use --no-verify (not recommended)"
+    fi
   done
   $SUDO bash install.sh
 }

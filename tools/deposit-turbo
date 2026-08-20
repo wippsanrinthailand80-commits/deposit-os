@@ -22,6 +22,22 @@ HOTKEY="Alt+K"
 
 log(){ echo "deposit-turbo: $*"; }
 
+# Hardening: refuse to run if STATE_DIR is a symlink (a symlink here would let a
+# local user redirect the root-owned state file at write time), and write the
+# state atomically via a same-directory temp file + rename.
+if [[ -L "$STATE_DIR" ]]; then
+  log "refusing: $STATE_DIR is a symlink"
+  exit 1
+fi
+mkdir -p "$STATE_DIR" || { log "cannot create $STATE_DIR"; exit 1; }
+
+write_state(){
+  local val="$1" tmp
+  tmp="$(mktemp "$STATE_DIR/state.XXXXXX")" || return 1
+  echo "$val" > "$tmp" && mv -f "$tmp" "$STATE"
+  rm -f "$tmp" 2>/dev/null || true
+}
+
 cpu_set(){
   local gov="$1" f
   for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
@@ -49,18 +65,16 @@ gpu_set(){
 }
 
 on(){
-  mkdir -p "$STATE_DIR"
   cpu_set performance 0
   gpu_set high
-  echo on > "$STATE"
+  write_state on
   log "ON  (CPU=performance, GPU=high)"
 }
 
 off(){
-  mkdir -p "$STATE_DIR"
   cpu_set powersave 1
   gpu_set auto
-  echo off > "$STATE"
+  write_state off
   log "OFF (normal mode)"
 }
 

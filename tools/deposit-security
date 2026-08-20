@@ -4,6 +4,8 @@
 Launched from the quick menu's Security tile. Firewall toggles run through
 pkexec; the AV scan runs deposit-av against the user's home.
 """
+import os
+import shutil
 import subprocess
 import gi
 
@@ -23,26 +25,28 @@ button { border-radius: 10px; }
 
 
 def run(cmd, timeout=30):
+    """Run an argv list (no shell). String commands are split safely."""
     try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                              timeout=timeout)
+        if isinstance(cmd, str):
+            import shlex
+            cmd = shlex.split(cmd)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except Exception:
         return None
 
 
 def ufw_active():
-    r = run("ufw status 2>/dev/null | head -1")
-    return bool(r and "active" in r.stdout.lower())
+    r = run(["ufw", "status"])
+    return bool(r and r.stdout and "active" in r.stdout.lower())
 
 
 def aa_enabled():
-    r = run("aa-status --enabled >/dev/null 2>&1 && echo on || echo off")
-    return (r.stdout.strip() if r else "off") == "on"
+    r = run(["aa-status", "--enabled"])
+    return bool(r is not None and r.returncode == 0)
 
 
 def clamav_present():
-    return subprocess.run("command -v clamscan >/dev/null 2>&1",
-                          shell=True).returncode == 0
+    return shutil.which("clamscan") is not None
 
 
 class SecurityCenter(Gtk.Window):
@@ -132,7 +136,7 @@ class SecurityCenter(Gtk.Window):
 
     def on_fw(self, btn):
         want = "disable" if ufw_active() else "--force enable"
-        run("pkexec ufw %s" % want)
+        run(["pkexec", "ufw", want])
         GLib.timeout_add(800, self._refresh_safe)
 
     def _refresh_safe(self):
@@ -142,8 +146,9 @@ class SecurityCenter(Gtk.Window):
     def on_scan(self, btn):
         btn.set_label("Scanning…")
         self.out.set_text("Scanning home directory…")
-        r = run('deposit-av "$HOME" 2>&1 | tail -6', timeout=300)
-        txt = (r.stdout.strip() if r and r.stdout else "scan complete")
+        r = run(["deposit-av", os.path.expanduser("~")], timeout=300)
+        lines = (r.stdout or "").splitlines() if r else []
+        txt = "\n".join(lines[-6:]) or "scan complete"
         self.out.set_text(txt)
         btn.set_label("Run scan")
 

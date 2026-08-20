@@ -6,9 +6,11 @@ Samsung-One-UI-inspired: a rounded card with a grid of toggle tiles
 section and an ARM build note. Toggle it with the close (x) button or
 `deposit-quickmenu-toggle` (Super+Q).
 """
+import glob
 import os
 import re
 import signal
+import shutil
 import subprocess
 import gi
 
@@ -19,46 +21,54 @@ APP = None
 
 
 def run(cmd, timeout=15):
+    """Run an argv list (no shell). String commands are split safely."""
     try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                               timeout=timeout)
+        if isinstance(cmd, str):
+            import shlex
+            cmd = shlex.split(cmd)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except Exception:
         return None
+
+
+def launch(args):
+    """Start a GUI helper detached (replaces the old 'cmd &' shell background)."""
+    try:
+        subprocess.Popen(args, start_new_session=True)
+    except Exception:
+        pass
 
 
 # --------------------------------------------------------------------------
 # backends
 # --------------------------------------------------------------------------
 def wifi_on():
-    r = run("nmcli radio wifi 2>/dev/null")
+    r = run(["nmcli", "radio", "wifi"])
     return bool(r and r.stdout.strip().lower() == "enabled")
 
 
 def set_wifi(on):
-    run("nmcli radio wifi " + ("on" if on else "off"))
+    run(["nmcli", "radio", "wifi", "on" if on else "off"])
 
 
 def airplane_on():
-    r = run("rfkill list all 2>/dev/null")
+    r = run(["rfkill", "list", "all"])
     return bool(r and "Soft blocked: yes" in r.stdout)
 
 
 def set_airplane(on):
-    if on:
-        run("rfkill block all")
-    else:
-        run("rfkill unblock all")
+    run(["rfkill", "block" if on else "unblock", "all"])
 
 
 def turbo_state():
-    r = run("cat /var/lib/deposit-turbo/state 2>/dev/null")
+    r = run(["cat", "/var/lib/deposit-turbo/state"])
     return (r.stdout.strip() if r and r.stdout.strip() else "off")
 
 
 def brightness_pct():
-    r = run("brightnessctl g 2>/dev/null")
+    r = run(["brightnessctl", "g"])
     if r and r.stdout.strip().isdigit():
-        m = run("brightnessctl m 2>/dev/null")
+        m = run(["brightnessctl", "m"])
         if m and m.stdout.strip().isdigit() and int(m.stdout.strip()):
             return int(r.stdout.strip()) * 100 // int(m.stdout.strip())
     return 50
@@ -67,13 +77,20 @@ def brightness_pct():
 def set_brightness(pct):
     if not 0 <= pct <= 100:
         pct = 50
-    run("brightnessctl s %d%% 2>/dev/null" % pct)
-    run("for f in /sys/class/backlight/*/brightness; do "
-        "echo $(( $(cat ${f%/*}/max_brightness) * %d / 100 )) > \"$f\"; done" % pct)
+    run(["brightnessctl", "s", "%d%%" % pct])
+    # fallback: write sysfs backlights directly (no shell loop)
+    for f in glob.glob("/sys/class/backlight/*/brightness"):
+        try:
+            base = os.path.dirname(f)
+            mx = int(open(os.path.join(base, "max_brightness")).read().strip())
+            val = mx * pct // 100
+            open(f, "w").write(str(val))
+        except Exception:
+            pass
 
 
 def volume_pct():
-    r = run("pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null")
+    r = run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"])
     if r and r.stdout:
         m = re.search(r"(\d+)%", r.stdout)
         if m:
@@ -83,11 +100,11 @@ def volume_pct():
 
 def set_volume(pct):
     pct = max(0, min(100, pct))
-    run("pactl set-sink-volume @DEFAULT_SINK@ %d%%" % pct)
+    run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "%d%%" % pct])
 
 
 def lan_dev():
-    r = run("nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null")
+    r = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
     if r and r.stdout:
         for line in r.stdout.strip().splitlines():
             p = line.split(":")
@@ -105,21 +122,16 @@ def set_lan(on):
     d, s = lan_dev()
     if not d:
         return
-    if on:
-        run("nmcli device connect %s" % d)
-    else:
-        run("nmcli device disconnect %s" % d)
+    run(["nmcli", "device", "connect" if on else "disconnect", d])
 
 
 def security_status():
     lines = []
-    lines.append("ClamAV: " + ("installed" if subprocess.run(
-        "command -v clamscan >/dev/null 2>&1", shell=True).returncode == 0
-        else "not installed"))
-    fw = run("ufw status 2>/dev/null | head -1")
+    lines.append("ClamAV: " + ("installed" if shutil.which("clamscan") else "not installed"))
+    fw = run(["ufw", "status"])
     lines.append("Firewall: " + (fw.stdout.strip() if fw else "unknown"))
-    aa = run("aa-status --enabled >/dev/null 2>&1 && echo on || echo off")
-    lines.append("AppArmor: " + (aa.stdout.strip() if aa else "unknown"))
+    aa = run(["aa-status", "--enabled"])
+    lines.append("AppArmor: " + ("on" if (aa is not None and aa.returncode == 0) else "off"))
     return "\n".join(lines)
 
 
@@ -144,6 +156,22 @@ def set_tile_active(btn, active):
         ctx.add_class("active")
     else:
         ctx.remove_class("active")
+
+
+def write_pidfile():
+    """Write our PID atomically to a per-user runtime dir, refusing any
+    pre-existing symlink (prevents a /tmp symlink-to-root-file race)."""
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    path = os.path.join(base, "deposit-quickmenu.pid")
+    if os.path.islink(path):
+        return  # attacker-controlled symlink: do not touch it
+    try:
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        with open(tmp, "w") as f:
+            f.write(str(os.getpid()))
+        os.replace(tmp, path)
+    except Exception:
+        pass
 
 
 class QuickMenu(Gtk.Window):
@@ -189,7 +217,7 @@ class QuickMenu(Gtk.Window):
         self.t_scan.connect("clicked", self.on_scan)
         self.t_files = Gtk.Button(label="Files")
         self.t_files.get_style_context().add_class("tile")
-        self.t_files.connect("clicked", lambda w: run("deposit-files &"))
+        self.t_files.connect("clicked", lambda w: launch(["deposit-files"]))
         self.t_power = self._tile("Power", False, self.on_power)
         self.t_sec = self._tile("Security", False, self.on_security)
         self.t_store = self._tile("Store", False, self.on_store)
@@ -245,12 +273,7 @@ class QuickMenu(Gtk.Window):
         GLib.idle_add(self.move_bottom_right)
 
         # toggle support: close hides; SIGUSR1 toggles
-        try:
-            with open("/run/deposit-quickmenu.pid", "w") as f:
-                f.write(str(os.getpid()))
-        except Exception:
-            with open("/tmp/deposit-quickmenu.pid", "w") as f:
-                f.write(str(os.getpid()))
+        write_pidfile()
 
     def _rowlabel(self, t):
         l = Gtk.Label(label=t)
@@ -298,7 +321,7 @@ class QuickMenu(Gtk.Window):
 
     def on_turbo(self, btn):
         new = turbo_state() != "on"
-        run("deposit-turbo " + ("on" if new else "off"))
+        run(["deposit-turbo", "on" if new else "off"])
         set_tile_active(btn, new)
 
     def on_lan(self, btn):
@@ -314,19 +337,19 @@ class QuickMenu(Gtk.Window):
 
     def on_scan(self, btn):
         btn.set_label("Scanning…")
-        r = run('deposit-av "$HOME" 2>&1 | tail -4', timeout=120)
-        out = (r.stdout.strip() if r and r.stdout else "scan complete")
+        r = run(["deposit-av", os.path.expanduser("~")], timeout=120)
+        out = "\n".join((r.stdout or "").splitlines()[-4:]) if r else "scan complete"
         self.sec.set_text(security_status() + "\n" + out)
         btn.set_label("Scan")
 
     def on_security(self, btn):
-        run("deposit-security &")
+        launch(["deposit-security"])
 
     def on_store(self, btn):
-        run("deposit-store &")
+        launch(["deposit-store"])
 
     def on_updates(self, btn):
-        run("deposit-updater &")
+        launch(["deposit-updater"])
 
     def on_power(self, btn):
         d = Gtk.Dialog(title="Power", parent=self,
@@ -337,15 +360,16 @@ class QuickMenu(Gtk.Window):
                       "Logout", 4, "Cancel", Gtk.ResponseType.CANCEL)
         resp = d.run()
         d.destroy()
+        # Power actions require admin authorization through polkit (pkexec),
+        # so they cannot be triggered by an unprivileged process silently.
         if resp == 1:
-            run("systemctl poweroff")
+            run(["pkexec", "systemctl", "poweroff"])
         elif resp == 2:
-            run("systemctl reboot")
+            run(["pkexec", "systemctl", "reboot"])
         elif resp == 3:
-            run("systemctl suspend")
+            run(["pkexec", "systemctl", "suspend"])
         elif resp == 4:
-            run('xfce4-session-logout --logout 2>/dev/null || '
-                'loginctl terminate-user "$(id -un)"')
+            run(["xfce4-session-logout", "--logout"])
 
 
 def _sig_toggle(signum, frame):

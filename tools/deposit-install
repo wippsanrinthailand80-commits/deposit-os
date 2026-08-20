@@ -20,6 +20,17 @@ if [[ -z "$TARGET" ]]; then
 fi
 [[ -b "$TARGET" ]] || { echo "deposit-install: '$TARGET' is not a block device"; exit 2; }
 
+# --- refuse to wipe the disk this system is currently running from ---------
+ROOT_SRC="$(findmnt -n -o SOURCE / 2>/dev/null)"
+if [[ "$ROOT_SRC" == /dev/* ]]; then
+  ROOT_DISK="$(lsblk -n -o PKNAME "$ROOT_SRC" 2>/dev/null | head -1)"
+  [[ -z "$ROOT_DISK" ]] && ROOT_DISK="$(basename "$ROOT_SRC")"
+  if [[ "/dev/$ROOT_DISK" == "$TARGET" || "$ROOT_SRC" == "$TARGET"* ]]; then
+    echo "deposit-install: refusing — $TARGET is the disk this system is running from."
+    exit 4
+  fi
+fi
+
 VER="$(ls /lib/modules 2>/dev/null | head -1)"
 [ -n "$VER" ] || { echo "deposit-install: no kernel modules found"; exit 1; }
 

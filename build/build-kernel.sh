@@ -217,6 +217,10 @@ CONFIG_SERIAL_8250_PCI=y
 CONFIG_HW_RANDOM=y
 CONFIG_RTC_CLASS=y
 CONFIG_MAGIC_SYSRQ=y
+# Magic SysRq is compiled in (useful for recovery) but disabled by default so a
+# local console cannot trigger privileged panic/screenshot/keydump actions
+# without explicitly enabling it via sysctl.
+CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE=0x0
 CONFIG_PRINTK=y
 CONFIG_EARLY_PRINTK=y
 CONFIG_NLS_DEFAULT="utf8"
