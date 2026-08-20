@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a problem with Deposit OS
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more detail you give, the faster we can help.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected to happen.
+      placeholder: When I toggle Turbo mode, the spinner never appears…
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options:
+        - x86_64 (amd64)
+        - ARM64 (test only — not yet supported)
+        - Other / unknown
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Deposit OS version / build
+      placeholder: e.g. 0.1.0, or the GitHub Actions run id
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Boot the ISO
+        2. Open the quick menu (Super+Q)
+        3. Click Turbo
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / screenshots
+      description: Paste terminal output, or drag-and-drop a screenshot.
+      render: shell
+    validations:
+      required: false

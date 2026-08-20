@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # --------------------------------------------------------------------------
@@ -192,3 +192,34 @@ jobs:
             /tmp/os-shot/os.png
             /tmp/shots/live-*.png
           if-no-files-found: warn
+
+      # ---- Build a bootable ISO and publish it to a continuous release ------
+      - name: install ISO build deps
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            xorriso grub-efi-amd64-bin grub-pc-bin squashfs-tools initramfs-tools
+      - name: build bootable ISO
+        continue-on-error: true
+        run: sudo bash ci/make-iso.sh build/output/rootfs build/output/kernel build/output/deposit-os.iso
+      - name: boot-check ISO (non-fatal)
+        continue-on-error: true
+        run: |
+          qemu-system-x86_64 -m 2048 -smp 2 -cpu max -cdrom build/output/deposit-os.iso -boot d \
+            -vnc :1 -qmp tcp:127.0.0.1:4445,server,nowait -daemonize
+          sleep 100
+          python3 ci/qmp_screendump.py /tmp/iso-boot.png 127.0.0.1 4445 || true
+          pkill -f qemu-system-x86_64 || true
+      - name: upload ISO
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-os.iso
+          path: build/output/deposit-os.iso
+          if-no-files-found: warn
+      - name: publish ISO to continuous release
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.run_id }}
+        run: bash ci/publish-release.sh

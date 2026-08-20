@@ -1,177 +1,113 @@
 # Deposit OS
 
-A **new** Linux distribution. Unlike a respin, Deposit OS is built **from the
-kernel up**: we compile our own Linux kernel from upstream source and assemble
-a minimal userspace, then package it as a single offline installer — the
-**`.mlpds`** file.
+**A Linux distribution built from the kernel up** — we compile our own Linux
+kernel from upstream source and assemble a minimal, apt-compatible userspace.
+Deposit OS runs standard Ubuntu/Debian `.deb` packages (via `apt`/`dpkg`) and
+adds its own packaging format (`.mlpds`) and installer (`aqa`).
 
-> **Why another distro?** The goal is a lightweight OS for older hardware that
-> still *runs Ubuntu software*. So Deposit OS is **glibc / `dpkg` / `apt`
-> compatible** (Ubuntu `.deb` packages install and run) while being assembled,
-> not cloned, from an Ubuntu install — and it ships its **own compiled kernel**.
+- **Own kernel**: Linux 6.6.58 (LTS), configured from `defconfig` plus
+  `build/kernel-fragments/deposit-broad.cfg`.
+- **Lean userspace**: `debootstrap` of Ubuntu 24.04 (Noble), glibc-based,
+  systemd init — ABI-compatible with the Debian/Ubuntu package pool.
+- **`.mlpds` packages + `aqa` installer**: fast, unified package management
+  with native `.mlpds` support and direct `.deb`/`apt` compatibility.
+- **Turbo mode**: one command flips the CPU/GPU into maximum-performance
+  (`performance` governor + GPU power profile) with a spinning/fade transition FX.
+- **Security**: AppArmor (in the kernel), ClamAV antivirus, and a firewall
+  (`ufw`) — surfaced in the quick menu.
+- **Samsung-style quick menu**: a floating, toggleable panel
+  (`Super+Q`) with Wi‑Fi, Airplane, Turbo, LAN toggles, Brightness **and
+  Volume** sliders, a Security section, and a drive-centric file manager.
+- **Thai language** support out of the box, plus a rounded, branded aesthetic.
 
-## The one honest contradiction
+## Screenshots
 
-A distro that *truly runs `.deb`/`apt`* must be Debian/Ubuntu **ABI-compatible**
-(glibc, dpkg, apt). You cannot have "runs Ubuntu packages" *and* "zero Debian
-components" at the same time. Deposit OS resolves this by:
+| Boot screen | Desktop + quick menu | Turbo transition | `.mlpds` info | Tool demo |
+|-------------|---------------------|------------------|---------------|-----------|
+| ![boot](docs/assets/boot.png) | ![desktop](docs/assets/desktop.png) | ![turbo](docs/assets/turbo.png) | ![mlpds](docs/assets/mlpds.png) | ![demo](docs/assets/tool-demo.png) |
 
-| Layer        | Approach                                                         |
-|--------------|------------------------------------------------------------------|
-| **Kernel**   | Compiled by us from `kernel.org` source (`build/build-kernel.sh`)|
-| **Userspace**| *Assembled* with `debootstrap` (not a clone of an Ubuntu install)|
-| **Packages** | `dpkg` + `apt` included → Ubuntu `.deb`s install and run         |
-| **Installer**| Self-contained `.mlpds` file (offline / "airplane mode")         |
+(Generated automatically in CI and embedded in each Actions run Summary.)
 
-If you later want a *pure* from-scratch userspace (no dpkg/apt, e.g. BusyBox +
-musl), set `DEPOSIT_INSTALL_KERNEL_IN_ROOTFS` aside and drop the apt layer in
-`build/config.sh` — but then Ubuntu package support is lost. This trade-off is
-intentional and documented here.
+## Architecture
 
-## What is a `.mlpds` file?
+| Layer        | Choice |
+|--------------|--------|
+| Kernel       | Linux 6.6.58, built from kernel.org source (`build/build-kernel.sh`) |
+| C library    | glibc (via Ubuntu Noble debootstrap) |
+| Init system  | systemd |
+| Packaging    | `dpkg`/`apt` + Deposit `.mlpds` (`tools/mlpds`) |
+| Installer    | `aqa` (`tools/aqa`) |
+| Desktop      | XFCE4 + LightDM, autologin |
+| Live media   | GRUB2 + `live-boot` + SquashFS ISO (`ci/make-iso.sh`) |
+| Security     | AppArmor (kernel) · ClamAV · ufw |
 
-`.mlpds` = **M**eta-installer / **L**ightweight **P**ackage **D**istribution
-**S**et. It is a **general installation file** the system recognises by extension
-and can install *various things* with one command:
+## Quick Start
 
-- `os`      — a full Deposit OS image
-- `app`     — an application installed into an existing system
-- `driver`  — a kernel module / hardware driver pack
-- `bundle`  — a config or asset pack (dotfiles, fonts, themes…)
+### Build with GitHub Actions (recommended)
 
-It is a `tar.xz` containing a `manifest.json`, the payload (`rootfs/` or
-`rootfs.squashfs`), an `installer/install.sh`, and `config/defaults.json`.
-See [`.mlpds/spec.md`](.mlpds/spec.md) for the full format.
+Push to `main` (or open a PR). The CI pipeline:
 
-## Build & install (local)
+1. **mlpds tool + scripts + demo** — unit tests and a tool-demo screenshot.
+2. **build-kernel** — compiles the kernel (cached between runs).
+3. **build-rootfs** — debootstraps the userspace.
+4. **package .mlpds + live boot** — packages the OS as `.mlpds`, boots it under
+   QEMU, captures screenshots, builds the **ISO**, and publishes a continuous
+   release.
+
+The bootable ISO is attached to the **continuous** GitHub Release and also
+uploaded as the `deposit-os.iso` workflow artifact.
+
+### Build locally
 
 ```bash
-# 1) compile the kernel from source
-sudo bash build/build-kernel.sh --deps      # install build deps (apt)
-sudo bash build/build-kernel.sh
-
-# 2) assemble the apt-compatible userspace
-sudo apt-get install -y debootstrap
-sudo bash build/build-rootfs.sh build/output/rootfs
-
-# 3) package a .mlpds installer (self-contained, offline)
-sudo bash tools/mlpds create \
-  --rootfs build/output/rootfs \
-  --kernel build/output/kernel \
-  --out deposit.os.mlpds --type os
-
-# 4) install it
-sudo bash tools/mlpds install deposit.os.mlpds --target /mnt/sda1 --boot
+bash build/build-kernel.sh          # -> build/output/kernel
+bash build/build-rootfs.sh          # -> build/output/rootfs
+# Raw disk image (boots via QEMU -kernel):
+bash ci/make-disk.sh build/output/rootfs build/output/kernel build/output/deposit-disk.img 4096
+# Bootable ISO (BIOS + UEFI):
+bash ci/make-iso.sh  build/output/rootfs build/output/kernel build/output/deposit-os.iso
 ```
 
-Other `mlpds` commands: `info`, `extract`, `launch` (QEMU), `build-kernel`,
-`build-rootfs`.
-
-## Installer & apps — `aqa`
-
-`aqa` is the Deposit OS installer you run from a **real terminal on a physically
-installed Deposit OS** (it ships in `/usr/local/bin`, baked into the image). It
-finds and installs compatible packages from anywhere:
+Boot the ISO:
 
 ```bash
-# Scan a URL for .deb / .mlpds files and install them immediately
-aqa install http://example.com/builds/
+qemu-system-x86_64 -m 2048 -smp 2 -cpu max -cdrom build/output/deposit-os.iso -boot d
+```
 
-# Install a known app (Chrome + Stream are bundled by default)
-aqa install chrome
-aqa install stream          # needs a URL: set AQA_STREAM_URL or edit /etc/deposit/aqa.apps
+## Package management quick reference
 
-# Install the optional Turbo GUI applet (see below)
+```bash
+aqa install <URL>          # install from a .deb or .mlpds URL
+aqa install chrome         # install a pre-bundled offline package
+aqa install steam
 aqa install turbo
-
-aqa list                   # show installable apps
-aqa install chrome --dry-run
+aqa list                   # list installed packages
 ```
 
-- `.deb` files → installed via `apt`/`dpkg`.
-- `.mlpds` files → installed via `mlpds install`.
-- A URL can be passed directly to `install` (`aqa install http://...`), or as a
-  bare argument (`aqa http://...`) — both scan for `.deb`/`.mlpds`.
-- App registry lives at `/etc/deposit/aqa.apps` (`name|type|url`); "Stream" has
-  no fixed public URL, so set `AQA_STREAM_URL` or edit that file.
+## Specifications (minimum hardware)
 
-## Turbo mode (CPU / GPU)
+| Resource     | Minimum | Recommended |
+|--------------|---------|-------------|
+| Architecture | x86_64 (amd64) | x86_64; ARM64 is *test-only, not yet supported* |
+| RAM          | 1 GB    | 2 GB+ |
+| Storage      | 8 GB    | 16 GB+ |
+| Graphics     | VGA / any (boots headless too) | GPU with open drivers for Turbo |
+| Network      | optional | Ethernet or Wi‑Fi |
 
-`deposit-turbo` maximizes performance on demand:
-
-```bash
-deposit-turbo on      # CPU governor -> performance, GPU profile -> high
-deposit-turbo off     # back to normal (powersave / auto)
-deposit-turbo toggle  # flip
-deposit-turbo status  # current state + governor + hotkey
-```
-
-- **GPU** handling is best-effort and hardware-specific: AMD DPM
-  (`power_dpm_force_performance_level` = `high`/`auto`) and NVIDIA PowerMizer.
-  On hardware without a controllable profile it is a safe no-op.
-- **Hotkey**: `Alt+K` by default, configurable in `/etc/deposit/turbo.conf`
-  (`HOTKEY=...`). `aqa install turbo` also binds it in XFCE.
-- **GUI applet** (optional, keeps the base image light): `aqa install turbo`
-  drops a tray applet (`deposit-tray`) into the top-right. Click to toggle; when
-  you enable GPU speed a **spinning wheel appears and gradually fades away**, and
-  disabling it stops the spinner and returns to normal mode.
-
-## Localization — Thai
-
-Thai is a first-class language in Deposit OS (on by default):
-
-- **Fonts**: `fonts-thai-tlwg`, Noto (incl. emoji) are installed.
-- **Locale**: both `en_US.UTF-8` and `th_TH.UTF-8` are generated; the default
-  is English, and Thai is fully usable. Pick at install time with
-  `mlpds install --locale th_TH.UTF-8`, or set `DEPOSIT_DEFAULT_LOCALE` in
-  `build/config.sh` to make Thai the default.
-- Toggle in the build with `DEPOSIT_ENABLE_THAI=0`.
-
-## Look & feel — rounded, not angular
-
-The brand is intentionally soft/rounded:
-
-- **Theme**: Materia (rounded GTK) + Papirus icons, applied to new users via
-  `/etc/skel` XFCE config (`build-rootfs.sh`, Stage 7). Window decorations are
-  set `round_edges=true`.
-- **Logo**: a rounded, gradient mark in `assets/logo.svg` (brand) and
-  `assets/deposit-turbo.svg` (tray icon). The turbo tray applet uses the
-  rounded icon.
-
-## Default apps & services
-
-To stay light for older hardware, the base image is curated, not bloated:
-
-- **Included**: XFCE desktop + goodies, NetworkManager applet (Wi-Fi in the
-  tray), PulseAudio volume control, screenshot tool, archive manager, font
-  viewer. A **firewall (`ufw`)** is installed but *not* auto-enabled, so SSH
-  isn't locked out.
-- **On demand via AQA** (keeps the base small): Chrome, Stream, the Turbo
-  applet, or anything from a URL (`aqa install http://…`).
-- A web browser is deliberately **not** baked in — install Chrome with
-  `aqa install chrome` when you need it.
-
-## Testing
-
-- **Fast / offline** (no network, no real compile): `sudo bash tests/test_mlpds.sh`
-  exercises `create` / `info` / `extract` / `install` against a synthetic rootfs.
-- **Full** (kernel compile + real rootfs + packaged `.mlpds`): the GitHub Actions
-  workflow in `.github/workflows/ci.yml` does this on every push/PR.
-
-## Layout
+## Project layout
 
 ```
-build/
-  config.sh                 distro identity + build configuration
-  build-kernel.sh           compile Linux kernel from source
-  build-rootfs.sh           assemble apt/.deb-compatible userspace
-tools/
-  mlpds                     the installer tool (create/info/extract/install/launch)
-  mlpds-installer/installer/install.sh   installer payload shipped in every .mlpds
-.mlpds/spec.md              the .mlpds file format specification
-tests/test_mlpds.sh         offline unit/integration tests for the tool
+build/                 kernel + rootfs build scripts and config
+tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu, deposit-files, deposit-av, deposit-turbo-fx
+ci/                    make-disk.sh, make-iso.sh, live-boot.sh, demo + render helpers
+docs/assets/           screenshots used in this README
 ```
 
 ## License
 
-MIT (or your choice) — see repo for details.
+GPL-3.0 — see [LICENSE](LICENSE). The OS bundles many upstream components
+(Linux kernel, glibc, XFCE, …) each under their own licenses.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
