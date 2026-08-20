@@ -28,18 +28,24 @@ REL=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: applic
   "$API/releases")
 REL_ID=$(echo "$REL" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
 if [ -z "$REL_ID" ]; then echo "[release] failed to create release"; exit 1; fi
+# upload_url already points at uploads.github.com (no redirect needed).
+UP=$(echo "$REL" | python3 -c "import sys,json;print(json.load(sys.stdin).get('upload_url','').replace('{?name,label}',''))" 2>/dev/null)
+[ -n "$UP" ] || UP="$API/releases/$REL_ID/assets"
 
-curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+RESP=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"$ISO" \
-  "$API/releases/$REL_ID/assets?name=deposit-os.iso" >/dev/null
+  "$UP?name=deposit-os.iso")
+echo "$RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print('[release] iso ->',d.get('browser_download_url') or d.get('message'))" 2>/dev/null \
+  || echo "[release] iso upload http error"
 # also publish the .mlpds package if present
 MLPDS="${2:-deposit.os.mlpds}"
 if [ -f "$MLPDS" ]; then
-  curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  RESP=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/octet-stream" \
     --data-binary @"$MLPDS" \
-    "$API/releases/$REL_ID/assets?name=deposit.os.mlpds" >/dev/null
-  echo "[release] attached $MLPDS"
+    "$UP?name=deposit.os.mlpds")
+  echo "$RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print('[release] mlpds ->',d.get('browser_download_url') or d.get('message'))" 2>/dev/null \
+    || echo "[release] mlpds upload http error"
 fi
-echo "[release] published ISO to continuous release (id $REL_ID)"
+echo "[release] published to continuous release (id $REL_ID)"
