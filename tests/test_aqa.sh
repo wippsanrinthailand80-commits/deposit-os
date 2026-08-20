@@ -54,6 +54,23 @@ EOF
 out="$("$AQA" install "file://$WORK/idx.html" 2>&1)"; rc=$?
 echo "$out" | grep -qi "refusing" && ok "unverified .deb refused" || bad "unverified .deb refused (rc=$rc out=$out)"
 
+echo "[7c] aqa install <direct .deb link> --no-verify is STILL refused"
+echo "fake-binary" > "$WORK/direct.deb"
+out="$("$AQA" install "file://$WORK/direct.deb" --no-verify 2>&1)"; rc=$?
+echo "$out" | grep -qi "REQUIRED" && ok "direct .deb with --no-verify refused (checksum mandatory)" \
+  || bad "direct .deb with --no-verify not refused (rc=$rc out=$out)"
+
+echo "[7d] aqa install <direct .deb link>#sha256=wrong refuses on mismatch"
+out="$("$AQA" install "file://$WORK/direct.deb#sha256=deadbeef" 2>&1)"; rc=$?
+echo "$out" | grep -qi "checksum mismatch" && ok "direct .deb wrong sha256 refused" \
+  || bad "direct .deb wrong sha256 not refused (rc=$rc out=$out)"
+
+echo "[7e] aqa install <direct .deb link>#sha256=correct verifies (no install side effect here)"
+sum="$(sha256sum "$WORK/direct.deb" | cut -d' ' -f1)"
+out="$("$AQA" install "file://$WORK/direct.deb#sha256=$sum" --dry-run 2>&1)"; rc=$?
+echo "$out" | grep -qi "direct file link detected" && ok "direct .deb link detected" \
+  || bad "direct .deb link not detected (rc=$rc out=$out)"
+
 echo "[8] build config has Thai/theme/apps + brand assets exist"
 if source "$REPO/build/config.sh" 2>/dev/null; then
   [[ "${DEPOSIT_ENABLE_THAI:-0}" == "1" ]] && ok "thai enabled" || bad "thai enabled"

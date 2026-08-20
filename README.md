@@ -99,12 +99,15 @@ same artifacts are also uploaded to the workflow run.
 ## Package management quick reference
 
 ```bash
-aqa install <URL>          # install from a .deb or .mlpds URL; the URL must end
-                           # in #sha256=<hash> (e.g. http://x/pkg.deb#sha256=abc...)
-                           # or pass --no-verify to skip the integrity check
-aqa install chrome         # install a pre-bundled offline package
-aqa install steam
-aqa install turbo
+aqa install <URL>          # install from a .deb or .mlpds URL. A direct file URL
+                           # (e.g. http://x/pkg.deb) is downloaded as-is; a page
+                           # URL is scanned for .deb/.mlpds links. .mlpds are GPG
+                           # verified. Arbitrary web .deb REQUIRE a checksum:
+                           # append #sha256=<hash> to the URL (or pass it as the
+                           # 2nd argument). --no-verify does NOT bypass this.
+aqa install chrome         # curated app: installs on its registered sha256, or
+aqa install steam          # with --no-verify when no checksum is registered
+aqa install turbo          # (trusted source only)
 aqa list                   # list installed packages
 ```
 

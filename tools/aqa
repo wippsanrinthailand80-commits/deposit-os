@@ -15,14 +15,19 @@
 #
 # Options:
 #   --dry-run      show what would happen, download/install nothing
-#   --no-verify    install code from the internet WITHOUT a checksum/signature
-#                  (dangerous; only for trusted local sources)
+#   --no-verify    ONLY for curated apps (chrome/stream/turbo): install without
+#                  a registered checksum. It does NOT bypass the mandatory
+#                  checksum requirement for arbitrary web .deb files.
 #   --type deb|mlpds   restrict the scan to one file type
 #
-# Security: a known app is only installed if its registered sha256 matches (or
-# you pass --no-verify). A .deb found by scanning an arbitrary URL is REFUSED
-# unless you supply its expected sha256 or pass --no-verify. .mlpds files are
-# verified through the GPG signature on the package.
+# Security:
+#   * Curated apps (chrome/stream/turbo): installed only if their registered
+#     sha256 matches, or you pass --no-verify (trusted source).
+#   * Arbitrary web sources (a scanned URL OR a direct .deb/.mlpds link):
+#     .mlpds are verified by the package's GPG signature; .deb files REQUIRE a
+#     sha256 checksum (append #sha256=<hash> to the URL, or pass it as the 2nd
+#     arg). --no-verify is IGNORED for arbitrary web .deb — a checksum is
+#     mandatory, because installing unverified code as root is the riskiest path.
 # ============================================================================
 set -uo pipefail
 
@@ -97,13 +102,59 @@ install_mlpds(){
   $SUDO mlpds install "$f" --target /
 }
 
+# --- verify + install a .deb (shared by curated apps and web sources) --------
+# $1=url $2=local file $3=curated(0/1) $4=expected sha256 (optional)
+# Curated (known apps / turbo): --no-verify is honoured when no checksum is
+# registered. Arbitrary web sources: a checksum is MANDATORY (supply via the
+# URL #sha256=<hash> fragment or the 2nd install argument); --no-verify is
+# ignored, because installing unverified code as root is the riskiest path.
+try_install_deb(){
+  local url="$1" f="$2" curated="${3:-0}" expect="${4:-}" got
+  # Allow the checksum to ride in the URL fragment:  http://x/app.deb#sha256=H
+  local frag="${url##*#}"; [[ "$frag" == "$url" ]] && frag=""
+  if [[ -z "$expect" && "$frag" == sha256=* ]]; then expect="${frag#sha256=}"; fi
+  if [[ -n "$expect" ]]; then
+    got="$(sha256sum "$f" | cut -d' ' -f1)"
+    if [[ "$got" == "$expect" ]]; then
+      log "checksum verified for $url"; install_deb "$f"; return 0
+    fi
+    log "refusing $url: checksum mismatch (expected $expect, got $got)"; return 1
+  fi
+  if (( curated )); then
+    if (( NOVERIFY )); then
+      log "WARN: installing unverified (curated) .deb from $url (--no-verify)"
+      install_deb "$f"; return 0
+    fi
+    log "refusing $url: no checksum registered — pass --no-verify or supply a sha256"
+    return 1
+  fi
+  log "refusing to install unverified .deb from $url"
+  log "  a checksum is REQUIRED for arbitrary web sources:"
+  log "  append  #sha256=<hash>  to the URL (or pass it as the 2nd install argument)"
+  (( NOVERIFY )) && log "  (--no-verify does NOT bypass this requirement)"
+  return 1
+}
+
 # --- scan a URL for .deb/.mlpds and install --------------------------------
-# $2 (optional) is the expected sha256 of the file(s) found. A .deb from an
-# arbitrary URL is only installed if it matches that checksum OR --no-verify is
-# given; otherwise it is refused (installing code from the internet with no
-# integrity/authenticity check is the most dangerous path in aqa).
+# If the URL is itself a direct .deb/.mlpds file, download it directly.
+# Otherwise treat it as an HTML index and scan for links. $2 (optional) is the
+# expected sha256 (a #sha256=<hash> URL fragment also works).
 scan_url(){
-  local url="$1" expect="${2:-}" html links tmp f
+  local url="$1" expect="${2:-}" html links tmp f path tail
+  path="${url%%[?#]*}"; tail="$(basename "$path")"
+  case "$tail" in
+    *.deb|*.mlpds)
+      log "direct file link detected: $url"
+      tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
+      f="$tmp/$tail"
+      download "$url" "$f" || die "download failed: $url"
+      case "$f" in
+        *.deb)   try_install_deb "$url" "$f" 0 "$expect" ;;
+        *.mlpds) install_mlpds "$f" ;;
+      esac
+      return 0
+      ;;
+  esac
   log "scanning $url"
   html="$(fetch "$url")" || die "could not fetch $url"
   links="$(echo "$html" | grep -oE 'href="[^"]+\.(deb|mlpds)"' | sed -E 's/href="([^"]+)"/\1/' | sort -u)"
@@ -119,23 +170,8 @@ scan_url(){
     if (( DRYRUN )); then log "[dry-run] would fetch+install $f"; continue; fi
     out="$tmp/$(basename "$f")"
     download "$f" "$out" || { log "download failed: $f"; continue; }
-     case "$out" in
-      *.deb)
-        if [[ -n "$expect" ]]; then
-          local got; got="$(sha256sum "$out" | cut -d' ' -f1)"
-          if [[ "$got" == "$expect" ]]; then
-            log "checksum verified for $f"; install_deb "$out"
-          else
-            log "refusing $f: checksum mismatch (expected $expect, got $got)"
-          fi
-        elif (( NOVERIFY )); then
-          log "WARN: installing unverified .deb from $f (--no-verify)"
-          install_deb "$out"
-        else
-          log "refusing to install unverified .deb from $f"
-          log "  supply the expected sha256, or re-run with --no-verify (not recommended)"
-        fi
-        ;;
+    case "$out" in
+      *.deb)   try_install_deb "$f" "$out" 0 "$expect" ;;
       *.mlpds) install_mlpds "$out" ;;
     esac
   done
@@ -156,18 +192,9 @@ install_app(){
       local out="$tmp/$(basename "$url")"
       log "downloading $name ..."
       download "$url" "$out" || die "download failed: $url"
-      # Verify against a registered checksum when one exists.
+      # Curated: honour a registered checksum, or --no-verify when none exists.
       local sum; sum="$(app_sum "$name" 2>/dev/null || true)"
-      if [[ -n "$sum" ]]; then
-        local got; got="$(sha256sum "$out" | cut -d' ' -f1)"
-        [[ "$got" == "$sum" ]] || die "aqa: checksum mismatch for $name (expected $sum, got $got) — refusing"
-        log "checksum verified for $name"
-      elif (( NOVERIFY )); then
-        log "WARN: no checksum registered for $name; installing unverified (--no-verify)"
-      else
-        die "aqa: no checksum registered for '$name' — refusing to install unverified. Add the sha256 to $APPS_CONF or pass --no-verify (not recommended)"
-      fi
-      install_deb "$out"
+      try_install_deb "$url" "$out" 1 "$sum" || die "aqa: $name was not installed (see above)"
       ;;
     *) die "unknown app: $name (try: $(app_list | cut -d'|' -f1 | paste -sd' '))" ;;
   esac
