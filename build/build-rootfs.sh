@@ -118,10 +118,13 @@ chroot "$ROOTFS" /bin/bash -c '
 # shipped image never carries a known/default credential (closes the OOBE audit
 # gap: SSH and any other auth are unusable until the user sets their own).
 RPW="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
-chroot "$ROOTFS" /bin/bash -c 'id '"$DEPOSIT_DEFAULT_USER"' >/dev/null 2>&1 || useradd -m -s /bin/bash '"$DEPOSIT_DEFAULT_USER"'
-U="$DEPOSIT_DEFAULT_USER" P="$RPW" chroot "$ROOTFS" /bin/bash -c 'echo "$U:$P" | chpasswd'
-chroot "$ROOTFS" /bin/bash -c 'usermod -aG sudo '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true'
-chroot "$ROOTFS" /bin/bash -c 'chage -d 0 '"$DEPOSIT_DEFAULT_USER"' 2>/dev/null || true'
+if ! chroot "$ROOTFS" id "$DEPOSIT_DEFAULT_USER" >/dev/null 2>&1; then
+  chroot "$ROOTFS" useradd -m -s /bin/bash "$DEPOSIT_DEFAULT_USER"
+fi
+# Pipe the random password on stdin (never via an env var / command line).
+printf '%s:%s\n' "$DEPOSIT_DEFAULT_USER" "$RPW" | chroot "$ROOTFS" chpasswd
+chroot "$ROOTFS" usermod -aG sudo "$DEPOSIT_DEFAULT_USER" 2>/dev/null || true
+chroot "$ROOTFS" chage -d 0 "$DEPOSIT_DEFAULT_USER" 2>/dev/null || true
 echo "[rootfs] user '$DEPOSIT_DEFAULT_USER': random password set, force-change on first login (set it via OOBE)"
 
 # --- Stage 6: Deposit OS tooling (aqa installer + turbo engine) ------------
@@ -196,14 +199,10 @@ X-GNOME-Autostart-enabled=true
 EOF
 
 # --- Stage 5c: quick menu + virus scanner + OS security features ----------
-chroot "$ROOTFS" /bin/bash -c '
-  export DEBIAN_FRONTEND=noninteractive
-  export APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-  apt-get $APT_OPTS update -qq
-  apt-get $APT_OPTS install -y --no-install-recommends \
-    clamav clamav-freshclam apparmor apparmor-utils brightnessctl rfkill \
-    python3-gi gir1.2-gtk-3.0 wpasupplicant || echo "WARN: security install issue"
-'
+DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS" apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq
+DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS" apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
+  clamav clamav-freshclam apparmor apparmor-utils brightnessctl rfkill \
+  python3-gi gir1.2-gtk-3.0 wpasupplicant || echo "WARN: security install issue"
 # Deposit tooling: bottom-right quick menu + AV wrapper (launchable in terminal).
 cp "$REPO_ROOT/tools/deposit-quickmenu"      "$ROOTFS/usr/local/bin/deposit-quickmenu"
 cp "$REPO_ROOT/tools/deposit-quickmenu-toggle" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle"
