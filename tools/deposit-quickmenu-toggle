@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# deposit-quickmenu-toggle — show/hide the Deposit quick menu.
+# Sends SIGUSR1 to the running instance (which toggles visibility); if it is
+# not running, launches it. Bound to Super+Q in the XFCE session.
+set -uo pipefail
+for P in /run/deposit-quickmenu.pid /tmp/deposit-quickmenu.pid; do
+  if [[ -f "$P" ]] && kill -USR1 "$(cat "$P")" 2>/dev/null; then
+    exit 0
+  fi
+done
+# not running -> start it
+deposit-quickmenu &

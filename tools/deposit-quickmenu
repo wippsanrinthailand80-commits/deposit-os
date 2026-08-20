@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Deposit OS quick menu — small floating control panel pinned bottom-right.
+"""Deposit OS quick menu — floating control panel pinned bottom-right.
 
-Test version. Provides Wi-Fi, screen-brightness and airplane-mode toggles, a
-security status section (ClamAV / firewall / AppArmor) with a one-click AV
-scan, and an ARM build notice (ARM is not yet supported). It auto-starts in
-the XFCE session and can also be launched from a terminal as
-`deposit-quickmenu`.
+Samsung-One-UI-inspired: a rounded card with a grid of toggle tiles
+(Wi-Fi, Airplane, Turbo, LAN), Brightness + Volume sliders, a Security
+section and an ARM build note. Toggle it with the close (x) button or
+`deposit-quickmenu-toggle` (Super+Q).
 """
+import os
+import re
+import signal
 import subprocess
-import time
 import gi
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
+
+APP = None
 
 
 def run(cmd, timeout=15):
@@ -24,8 +27,7 @@ def run(cmd, timeout=15):
 
 
 # --------------------------------------------------------------------------
-# backends (best-effort; the panel degrades gracefully when a device/host
-# capability is missing — e.g. a VM has no real backlight or Wi-Fi radio)
+# backends
 # --------------------------------------------------------------------------
 def wifi_on():
     r = run("nmcli radio wifi 2>/dev/null")
@@ -48,6 +50,11 @@ def set_airplane(on):
         run("rfkill unblock all")
 
 
+def turbo_state():
+    r = run("cat /var/lib/deposit-turbo/state 2>/dev/null")
+    return (r.stdout.strip() if r and r.stdout.strip() else "off")
+
+
 def brightness_pct():
     r = run("brightnessctl g 2>/dev/null")
     if r and r.stdout.strip().isdigit():
@@ -61,17 +68,54 @@ def set_brightness(pct):
     if not 0 <= pct <= 100:
         pct = 50
     run("brightnessctl s %d%% 2>/dev/null" % pct)
-    # fallback: write every sysfs backlight directly
     run("for f in /sys/class/backlight/*/brightness; do "
         "echo $(( $(cat ${f%/*}/max_brightness) * %d / 100 )) > \"$f\"; done" % pct)
 
 
+def volume_pct():
+    r = run("pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null")
+    if r and r.stdout:
+        m = re.search(r"(\d+)%", r.stdout)
+        if m:
+            return int(m.group(1))
+    return 50
+
+
+def set_volume(pct):
+    pct = max(0, min(100, pct))
+    run("pactl set-sink-volume @DEFAULT_SINK@ %d%%" % pct)
+
+
+def lan_dev():
+    r = run("nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null")
+    if r and r.stdout:
+        for line in r.stdout.strip().splitlines():
+            p = line.split(":")
+            if len(p) >= 3 and p[1] == "ethernet":
+                return p[0], p[2]
+    return None, None
+
+
+def lan_on():
+    d, s = lan_dev()
+    return bool(d and s == "connected")
+
+
+def set_lan(on):
+    d, s = lan_dev()
+    if not d:
+        return
+    if on:
+        run("nmcli device connect %s" % d)
+    else:
+        run("nmcli device disconnect %s" % d)
+
+
 def security_status():
     lines = []
-    if subprocess.run("command -v clamscan >/dev/null 2>&1", shell=True).returncode == 0:
-        lines.append("ClamAV: installed")
-    else:
-        lines.append("ClamAV: not installed")
+    lines.append("ClamAV: " + ("installed" if subprocess.run(
+        "command -v clamscan >/dev/null 2>&1", shell=True).returncode == 0
+        else "not installed"))
     fw = run("ufw status 2>/dev/null | head -1")
     lines.append("Firewall: " + (fw.stdout.strip() if fw else "unknown"))
     aa = run("aa-status --enabled >/dev/null 2>&1 && echo on || echo off")
@@ -79,76 +123,139 @@ def security_status():
     return "\n".join(lines)
 
 
-def turbo_state():
-    r = run("cat /var/lib/deposit-turbo/state 2>/dev/null")
-    return (r.stdout.strip() if r and r.stdout.strip() else "off")
+CSS = """
+window { background-color: rgba(244,244,247,0.97); border-radius: 20px; }
+.header { font-size: 15px; font-weight: 700; color: #1c1c28; }
+.tile { border-radius: 14px; background-color: #e9e9ef; padding: 12px 6px;
+        color: #1c1c28; }
+.tile label { font-weight: 600; }
+.tile.active { background-color: #3b6dff; color: #ffffff; }
+.rowlabel { color: #555; font-weight: 600; }
+scale { min-height: 22px; }
+scale trough { background: #d6d6de; border-radius: 6px; }
+scale highlight { background: #3b6dff; border-radius: 6px; }
+.note { color: #999; }
+"""
+
+
+def set_tile_active(btn, active):
+    ctx = btn.get_style_context()
+    if active:
+        ctx.add_class("active")
+    else:
+        ctx.remove_class("active")
 
 
 class QuickMenu(Gtk.Window):
     def __init__(self):
         super().__init__(title="Deposit Quick")
-        self.set_default_size(240, -1)
+        self.set_resizable(False)
         self.set_keep_above(True)
         self.set_skip_taskbar_hint(True)
+        self.set_decorated(False)
         self.connect("destroy", Gtk.main_quit)
+
+        prov = Gtk.CssProvider()
+        prov.load_from_data(CSS.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            self.get_screen(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.set_border_width(14)
         self.add(box)
 
-        hdr = Gtk.Label()
-        hdr.set_markup('<span size="large"><b>Deposit OS</b></span>')
-        hdr.set_xalign(0)
+        # header
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        title = Gtk.Label(label="Deposit OS")
+        title.set_xalign(0)
+        title.get_style_context().add_class("header")
+        close = Gtk.Button(label="×")
+        close.set_relief(Gtk.ReliefStyle.NONE)
+        close.connect("clicked", lambda w: self.hide())
+        hdr.pack_start(title, True, True, 0)
+        hdr.pack_end(close, False, False, 0)
         box.pack_start(hdr, False, False, 0)
 
-        self.wifi_sw, row = self._switch_row("Wi-Fi", wifi_on(), self.on_wifi)
-        box.pack_start(row, False, False, 0)
-        self.air_sw, row = self._switch_row("Airplane mode", airplane_on(), self.on_air)
-        box.pack_start(row, False, False, 0)
-        self.turbo_sw, row = self._switch_row("Turbo", turbo_state() == "on", self.on_turbo)
-        box.pack_start(row, False, False, 0)
+        # tile grid
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(10)
+        self.t_wifi = self._tile("Wi-Fi", wifi_on(), self.on_wifi)
+        self.t_air = self._tile("Airplane", airplane_on(), self.on_air)
+        self.t_turbo = self._tile("Turbo", turbo_state() == "on", self.on_turbo)
+        self.t_lan = self._tile("LAN", lan_on(), self.on_lan)
+        self.t_scan = Gtk.Button(label="Scan")
+        self.t_scan.get_style_context().add_class("tile")
+        self.t_scan.connect("clicked", self.on_scan)
+        self.t_files = Gtk.Button(label="Files")
+        self.t_files.get_style_context().add_class("tile")
+        self.t_files.connect("clicked", lambda w: run("deposit-files &"))
+        grid.attach(self.t_wifi, 0, 0, 1, 1)
+        grid.attach(self.t_air, 1, 0, 1, 1)
+        grid.attach(self.t_turbo, 0, 1, 1, 1)
+        grid.attach(self.t_lan, 1, 1, 1, 1)
+        grid.attach(self.t_scan, 0, 2, 1, 1)
+        grid.attach(self.t_files, 1, 2, 1, 1)
+        box.pack_start(grid, False, False, 0)
 
+        # brightness
         br = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        br.pack_start(Gtk.Label(label="Brightness"), False, False, 0)
+        br.pack_start(self._rowlabel("Brightness"), False, False, 0)
         self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
         self.scale.set_value(brightness_pct())
-        self.scale.set_size_request(110, -1)
+        self.scale.set_size_request(150, -1)
         self.scale.set_draw_value(False)
         self.scale.connect("value-changed", self.on_bright)
         br.pack_start(self.scale, True, True, 0)
         box.pack_start(br, False, False, 0)
 
-        box.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
-                       False, False, 0)
+        # volume
+        vol = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        vol.pack_start(self._rowlabel("Volume"), False, False, 0)
+        self.vscale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.vscale.set_value(volume_pct())
+        self.vscale.set_size_request(150, -1)
+        self.vscale.set_draw_value(False)
+        self.vscale.connect("value-changed", self.on_vol)
+        vol.pack_start(self.vscale, True, True, 0)
+        box.pack_start(vol, False, False, 0)
 
-        sec = Gtk.Label()
-        sec.set_markup("<b>Security</b>")
-        sec.set_xalign(0)
-        box.pack_start(sec, False, False, 0)
+        # security status
         self.sec = Gtk.Label(label=security_status())
         self.sec.set_xalign(0)
-        self.sec.set_line_wrap(True)
+        self.sec.get_style_context().add_class("note")
         box.pack_start(self.sec, False, False, 0)
-        self.scan = Gtk.Button(label="Run AV scan")
-        self.scan.connect("clicked", self.on_scan)
-        box.pack_start(self.scan, False, False, 0)
 
+        # ARM note
         arm = Gtk.Label()
-        arm.set_markup('<span size="small" foreground="#888888">ARM build: test only — not yet supported.</span>')
+        arm.set_markup('<span size="small" foreground="#999999">'
+                       'ARM build: test only — not yet supported.</span>')
         arm.set_xalign(0)
         box.pack_start(arm, False, False, 0)
 
         self.show_all()
         GLib.idle_add(self.move_bottom_right)
 
-    def _switch_row(self, label, active, cb):
-        h = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        h.pack_start(Gtk.Label(label=label), False, False, 0)
-        sw = Gtk.Switch()
-        sw.set_active(active)
-        sw.connect("notify::active", cb)
-        h.pack_end(sw, False, False, 0)
-        return sw, h
+        # toggle support: close hides; SIGUSR1 toggles
+        try:
+            with open("/run/deposit-quickmenu.pid", "w") as f:
+                f.write(str(os.getpid()))
+        except Exception:
+            with open("/tmp/deposit-quickmenu.pid", "w") as f:
+                f.write(str(os.getpid()))
+
+    def _rowlabel(self, t):
+        l = Gtk.Label(label=t)
+        l.get_style_context().add_class("rowlabel")
+        return l
+
+    def _tile(self, label, active, cb):
+        b = Gtk.Button(label=label)
+        b.set_relief(Gtk.ReliefStyle.NONE)
+        b.get_style_context().add_class("tile")
+        set_tile_active(b, active)
+        b.connect("clicked", cb)
+        return b
 
     def move_bottom_right(self):
         try:
@@ -157,34 +264,60 @@ class QuickMenu(Gtk.Window):
             if w < 50:
                 w = 240
             if h < 50:
-                h = 380
+                h = 420
             self.move(max(0, mon.width - w - 12), max(0, mon.height - h - 12))
         except Exception:
             self.move(980, 600)
 
-    def on_wifi(self, sw, pspec):
-        set_wifi(sw.get_active())
+    def toggle_visibility(self):
+        if self.get_visible():
+            self.hide()
+        else:
+            self.show_all()
+            self.move_bottom_right()
+            self.present()
 
-    def on_air(self, sw, pspec):
-        set_airplane(sw.get_active())
+    # -- handlers ------------------------------------------------------------
+    def on_wifi(self, btn):
+        new = not wifi_on()
+        set_wifi(new)
+        set_tile_active(btn, new)
 
-    def on_turbo(self, sw, pspec):
-        run("deposit-turbo " + ("on" if sw.get_active() else "off"))
+    def on_air(self, btn):
+        new = not airplane_on()
+        set_airplane(new)
+        set_tile_active(btn, new)
+
+    def on_turbo(self, btn):
+        new = turbo_state() != "on"
+        run("deposit-turbo " + ("on" if new else "off"))
+        set_tile_active(btn, new)
+
+    def on_lan(self, btn):
+        new = not lan_on()
+        set_lan(new)
+        set_tile_active(btn, new)
 
     def on_bright(self, scale):
         set_brightness(int(scale.get_value()))
+
+    def on_vol(self, scale):
+        set_volume(int(scale.get_value()))
 
     def on_scan(self, btn):
         btn.set_label("Scanning…")
         r = run('deposit-av "$HOME" 2>&1 | tail -4', timeout=120)
         out = (r.stdout.strip() if r and r.stdout else "scan complete")
         self.sec.set_text(security_status() + "\n" + out)
-        btn.set_label("Run AV scan")
+        btn.set_label("Scan")
+
+
+def _sig_toggle(signum, frame):
+    if APP:
+        GLib.idle_add(APP.toggle_visibility)
 
 
 if __name__ == "__main__":
-    try:
-        QuickMenu()
-        Gtk.main()
-    except Exception as e:
-        print("deposit-quickmenu:", e)
+    signal.signal(signal.SIGUSR1, _sig_toggle)
+    APP = QuickMenu()
+    Gtk.main()

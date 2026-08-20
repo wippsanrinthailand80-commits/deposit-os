@@ -178,11 +178,25 @@ chroot "$ROOTFS" /bin/bash -c '
     python3-gi gir1.2-gtk-3.0 wpasupplicant || echo "WARN: security install issue"
 '
 # Deposit tooling: bottom-right quick menu + AV wrapper (launchable in terminal).
-cp "$REPO_ROOT/tools/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu"
-cp "$REPO_ROOT/tools/deposit-av"        "$ROOTFS/usr/local/bin/deposit-av"
-cp "$REPO_ROOT/tools/deposit-turbo-fx"  "$ROOTFS/usr/local/bin/deposit-turbo-fx"
-chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-av" \
-         "$ROOTFS/usr/local/bin/deposit-turbo-fx"
+cp "$REPO_ROOT/tools/deposit-quickmenu"      "$ROOTFS/usr/local/bin/deposit-quickmenu"
+cp "$REPO_ROOT/tools/deposit-quickmenu-toggle" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle"
+cp "$REPO_ROOT/tools/deposit-av"            "$ROOTFS/usr/local/bin/deposit-av"
+cp "$REPO_ROOT/tools/deposit-turbo-fx"      "$ROOTFS/usr/local/bin/deposit-turbo-fx"
+cp "$REPO_ROOT/tools/deposit-files"         "$ROOTFS/usr/local/bin/deposit-files"
+chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
+         "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
+         "$ROOTFS/usr/local/bin/deposit-files"
+
+# Desktop entry for the file manager.
+mkdir -p "$ROOTFS/usr/share/applications"
+cat > "$ROOTFS/usr/share/applications/deposit-files.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Deposit Files
+Exec=deposit-files
+Terminal=false
+Categories=System;FileTools;
+EOF
 
 # Autostart the quick menu in the XFCE session.
 mkdir -p "$ROOTFS/etc/xdg/autostart"
@@ -200,6 +214,22 @@ Type=Application
 Name=Deposit Turbo FX
 Exec=deposit-turbo-fx
 X-GNOME-Autostart-enabled=true
+EOF
+
+# Bind Super+Q to toggle the quick menu (applies to the default user's session).
+mkdir -p "$ROOTFS/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml"
+cat > "$ROOTFS/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-keyboard-shortcuts" version="1.0">
+  <property name="commands" type="empty">
+    <property name="custom" type="empty">
+      <property name="&lt;Super&gt;q" type="string" value="deposit-quickmenu-toggle"/>
+    </property>
+  </property>
+  <property name="providers" type="empty">
+    <property name="&lt;Super&gt;q" type="string" value="deposit-quickmenu-toggle"/>
+  </property>
+</channel>
 EOF
 # Best-effort: enforce shipped AppArmor profiles (no-op if kernel lacks AA).
 chroot "$ROOTFS" /bin/bash -c 'aa-enforce /etc/apparmor.d/* 2>/dev/null || true'

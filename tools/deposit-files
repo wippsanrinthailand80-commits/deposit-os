@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Deposit Files — a small drive-centric file manager.
+
+Shows mounted volumes with Windows-style drive letters (C:, D:, …) plus Root
+and Home, then lets you browse files and open them with the default app.
+Test version.
+"""
+import os
+import subprocess
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
+HOME = os.path.expanduser("~")
+
+
+def run(cmd, timeout=30):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                              timeout=timeout)
+    except Exception:
+        return None
+
+
+def list_drives():
+    drives = [("Root", "/"), ("Home", HOME)]
+    r = run("lsblk -rno NAME,SIZE,MOUNTPOINT 2>/dev/null")
+    if r and r.stdout:
+        parts = []
+        for line in r.stdout.strip().splitlines():
+            f = line.split()
+            if len(f) >= 2 and f[0][-1].isdigit():
+                mp = f[2] if len(f) > 2 else ""
+                parts.append(("/dev/" + f[0], f[1], mp))
+        letter = ord("C")
+        for dev, size, mp in parts:
+            drives.append((chr(letter) + ":  (" + size + ")", mp if mp else dev))
+            letter += 1
+    return drives
+
+
+def ensure_mounted(dev):
+    if not dev.startswith("/dev/"):
+        return dev
+    m = run("udisksctl mount -b %s 2>/dev/null" % dev)
+    if m and m.stdout:
+        for tok in m.stdout.split():
+            if tok.startswith(("/media", "/mnt", "/run/media")):
+                return tok.strip().rstrip(".")
+    r = run("lsblk -rno MOUNTPOINT %s 2>/dev/null" % dev)
+    if r and r.stdout.strip():
+        return r.stdout.strip().split()[0]
+    return None
+
+
+def target_for(label):
+    for name, target in list_drives():
+        if name == label:
+            return target
+    return None
+
+
+class Files(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Deposit Files")
+        self.set_default_size(720, 460)
+        self.cur = "/"
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(8)
+        self.add(box)
+
+        tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        up = Gtk.Button(label="↑ Up")
+        up.connect("clicked", self.on_up)
+        self.path = Gtk.Label(label="/")
+        self.path.set_xalign(0)
+        tb.pack_start(up, False, False, 0)
+        tb.pack_start(self.path, True, True, 0)
+        box.pack_start(tb, False, False, 0)
+
+        panes = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.dlist = Gtk.ListBox()
+        self.dlist.connect("row-activated", self.on_drive)
+        for name, _t in list_drives():
+            self.dlist.add(Gtk.Label(label=name))
+        dscr = Gtk.ScrolledWindow()
+        dscr.add(self.dlist)
+        dscr.set_size_request(190, -1)
+        panes.pack1(dscr, False, False)
+
+        self.flist = Gtk.ListBox()
+        self.flist.connect("row-activated", self.on_file)
+        fscr = Gtk.ScrolledWindow()
+        fscr.add(self.flist)
+        panes.pack2(fscr, True, True)
+        box.pack_start(panes, True, True, 0)
+
+        self.refresh("/")
+        self.show_all()
+
+    def refresh(self, path):
+        self.cur = path
+        self.path.set_label(path)
+        for c in self.flist.get_children():
+            self.flist.remove(c)
+        try:
+            names = sorted(os.listdir(path))
+        except Exception:
+            names = []
+        for n in names:
+            full = os.path.join(path, n)
+            lbl = n + ("/" if os.path.isdir(full) else "")
+            self.flist.add(Gtk.Label(label=lbl))
+        self.flist.show_all()
+
+    def on_up(self, *a):
+        p = os.path.dirname(self.cur.rstrip("/"))
+        self.refresh(p or "/")
+
+    def on_drive(self, lb, row):
+        label = row.get_child().get_text()
+        target = target_for(label)
+        if target is None:
+            return
+        if target.startswith("/dev/"):
+            m = ensure_mounted(target)
+            if m:
+                self.refresh(m)
+        else:
+            self.refresh(target)
+
+    def on_file(self, lb, row):
+        name = row.get_child().get_text().rstrip("/")
+        full = os.path.join(self.cur, name)
+        if os.path.isdir(full):
+            self.refresh(full)
+        else:
+            run('xdg-open "%s"' % full)
+
+
+if __name__ == "__main__":
+    Files()
+    Gtk.main()
