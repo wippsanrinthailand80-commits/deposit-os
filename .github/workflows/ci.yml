@@ -319,8 +319,19 @@ jobs:
             qemu-efi-aarch64 2>/dev/null || \
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             qemu-efi 2>/dev/null || true
-      - name: build ARM64 OS (kernel + rootfs + UEFI image)
-        run: sudo bash build/build-arm64.sh
+      - name: build ARM64 kernel (cross-compile)
+        run: sudo env DEPOSIT_ARCH=aarch64 bash build/build-kernel.sh 2>&1 | tee /tmp/arm64-kernel.log
+      - name: build ARM64 rootfs (debootstrap arm64 + qemu second-stage)
+        run: sudo env DEPOSIT_ARCH=aarch64 bash build/build-rootfs.sh 2>&1 | tee /tmp/arm64-rootfs.log
+      - name: build ARM64 UEFI image
+        run: sudo bash ci/make-arm64-image.sh build/output/rootfs build/output/kernel build/output/deposit-arm64.img 4096 2>&1 | tee /tmp/arm64-image.log
+      - name: upload ARM64 build logs (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-build-logs
+          path: /tmp/arm64-*.log
+          if-no-files-found: warn
       - name: upload ARM64 image
         if: always()
         uses: actions/upload-artifact@v4
