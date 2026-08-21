@@ -45,9 +45,12 @@ SRC_DIR="$DEPOSIT_BUILD_DIR/linux-$KVER"
 KOUT="$DEPOSIT_KERNEL_OUT"
 mkdir -p "$DEPOSIT_BUILD_DIR" "$KOUT"
 
-# --- Download + extract -----------------------------------------------------
-if [[ ! -d "$SRC_DIR" ]]; then
-  echo "[kernel] downloading linux-$KVER"
+# --- Download + extract (retry the whole download+extract on transient errors) --
+for dl_try in 1 2 3; do
+  if [[ -d "$SRC_DIR" ]]; then
+    break
+  fi
+  echo "[kernel] downloading linux-$KVER (attempt $dl_try)"
   DL_OK=0
   for U in "$DEPOSIT_KERNEL_URL" \
            "https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-${KVER}.tar.xz" \
@@ -58,10 +61,15 @@ if [[ ! -d "$SRC_DIR" ]]; then
     fi
     echo "[kernel] download failed, trying next mirror"
   done
-  (( DL_OK )) || { echo "[kernel] all download attempts failed"; exit 1; }
-  echo "[kernel] extracting"
-  tar -C "$DEPOSIT_BUILD_DIR" -xf "$DEPOSIT_BUILD_DIR/linux-$KVER.tar.xz"
-fi
+  if (( DL_OK )); then
+    echo "[kernel] extracting"
+    tar -C "$DEPOSIT_BUILD_DIR" -xf "$DEPOSIT_BUILD_DIR/linux-$KVER.tar.xz" && break
+  fi
+  echo "[kernel] download/extract failed, retrying..."
+  rm -rf "$SRC_DIR" "$DEPOSIT_BUILD_DIR/linux-$KVER.tar.xz"
+  sleep 5
+done
+[[ -d "$SRC_DIR" ]] || { echo "[kernel] all download attempts failed"; exit 1; }
 
 cd "$SRC_DIR"
 
@@ -263,8 +271,18 @@ fi
 # --- Build ------------------------------------------------------------------
 # Parallelism is capped by DEPOSIT_KERNEL_JOBS (default: all cores).
 # Lower it (e.g. 1) to trade build time for a smaller RAM spike.
+# Retry a couple of times: a single transient gcc crash / OOM kill should not
+# fail the whole pipeline.
 echo "[kernel] building with -j$DEPOSIT_KERNEL_JOBS (lower = less RAM, slower)"
-make "${MAKE_VARS[@]}" -j"$DEPOSIT_KERNEL_JOBS"
+built=0
+for attempt in 1 2 3; do
+  if make "${MAKE_VARS[@]}" -j"$DEPOSIT_KERNEL_JOBS"; then
+    built=1; break
+  fi
+  echo "[kernel] build attempt $attempt failed, retrying in 10s..."
+  sleep 10
+done
+(( built )) || { echo "[kernel] build failed after retries"; exit 1; }
 
 # --- Install artefacts -------------------------------------------------------
 mkdir -p "$KOUT/boot"
