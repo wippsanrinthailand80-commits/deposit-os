@@ -259,6 +259,11 @@ X86
 
   # Append the broad hardware-support fragment (distro-class driver set).
   cat "$SCRIPT_DIR/kernel-fragments/deposit-broad.cfg" >> .config
+  # Append the 80MB size-tuning fragment (Path 1: more HW coverage, larger artifact).
+  if [[ -f "$SCRIPT_DIR/kernel-fragments/deposit-80m.cfg" ]]; then
+    echo "[kernel] appending 80MB size-tuning fragment"
+    cat "$SCRIPT_DIR/kernel-fragments/deposit-80m.cfg" >> .config
+  fi
 
   echo "[kernel] olddefconfig"
   make "${MAKE_VARS[@]}" olddefconfig
