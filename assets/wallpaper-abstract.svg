@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#5b6ef5" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="b" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#22a8c8" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0.85"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <!-- flowing ribbons -->
+  <path d="M -200 420 C 320 180, 760 760, 1320 460 S 1920 620, 2120 380" fill="none" stroke="url(#a)" stroke-width="180" stroke-linecap="round" opacity="0.22"/>
+  <path d="M -200 680 C 420 520, 880 980, 1440 720 S 1920 880, 2120 640" fill="none" stroke="url(#b)" stroke-width="140" stroke-linecap="round" opacity="0.18"/>
+  <rect width="1920" height="1080" fill="white" opacity="0.02"/>
+  <g transform="translate(110,100)">
+    <rect width="280" height="56" rx="28" fill="white" opacity="0.09" stroke="white" stroke-opacity="0.14"/>
+    <text x="24" y="34" font-family="Noto Sans, sans-serif" font-size="16" font-weight="700" fill="white" opacity="0.92">Deposit OS • Beta 0.1.0.7</text>
+  </g>
+</svg>

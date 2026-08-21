@@ -105,11 +105,15 @@ deb $MIRROR $DEPOSIT_SUITE-security main universe
 EOF
 
 # Deposit OS identity (kept Debian/Ubuntu-ABI compatible via ID_LIKE).
+# Beta channel: PRETTY_NAME shows "Deposit OS Beta 0.1.0.7" when codename=beta.
+PRETTY_BETA="$DEPOSIT_PRETTY"
+if [[ "${DEPOSIT_VERSION_CODENAME:-}" == "beta" ]]; then PRETTY_BETA="$DEPOSIT_PRETTY_BETA"; fi
 cat > "$ROOTFS/etc/os-release" <<EOF
-PRETTY_NAME="$DEPOSIT_PRETTY $DEPOSIT_VERSION"
+PRETTY_NAME="$PRETTY_BETA $DEPOSIT_VERSION"
 NAME="$DEPOSIT_PRETTY"
 VERSION_ID="$DEPOSIT_VERSION"
-VERSION="$DEPOSIT_PRETTY $DEPOSIT_VERSION"
+VERSION="$PRETTY_BETA $DEPOSIT_VERSION"
+VERSION_CODENAME="$DEPOSIT_VERSION_CODENAME"
 ID=$DEPOSIT_ID
 ID_LIKE=$DEPOSIT_ID_LIKE
 HOME_URL="$DEPOSIT_HOME_URL"
@@ -118,6 +122,18 @@ PRIVACY_POLICY_URL="$DEPOSIT_BUG_REPORT_URL"
 SUPPORTED_ARCH="$BOOT_ARCH"
 EOF
 echo "$DEPOSIT_VERSION" > "$ROOTFS/etc/deposit-release"
+echo "$DEPOSIT_VERSION_CODENAME" > "$ROOTFS/etc/deposit-channel" 2>/dev/null || true
+# MOTD / issue for a nice first impression (nice UI: branded login banner)
+cat > "$ROOTFS/etc/update-motd.d/00-deposit-beta" <<MOTD
+#!/bin/sh
+echo ""
+echo "  ◆ Deposit OS Beta $DEPOSIT_VERSION — nice UI, nice backgrounds, x86_64 + arm64"
+echo "  ◆ Kernel ~80MB • Ubuntu compat (jammy/focal) • Samsung One UI inspired"
+echo ""
+MOTD
+chmod +x "$ROOTFS/etc/update-motd.d/00-deposit-beta" 2>/dev/null || true
+echo "Deposit OS Beta $DEPOSIT_VERSION (\\l) — \\d \\t" > "$ROOTFS/etc/issue"
+echo "Deposit OS Beta $DEPOSIT_VERSION" > "$ROOTFS/etc/issue.net"
 
 echo "$DEPOSIT_DEFAULT_HOSTNAME" > "$ROOTFS/etc/hostname"
 
@@ -455,18 +471,44 @@ cat > "$XCONF/xfwm4.xml" <<'EOF'
   </property>
 </channel>
 EOF
-# Brand assets
-cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/pixmaps/deposit-logo.svg"
-cp "$REPO_ROOT/assets/gear.svg"          "$ROOTFS/usr/share/pixmaps/deposit-gear.svg"
-cp "$REPO_ROOT/assets/deposit-turbo.svg" "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
-cp "$REPO_ROOT/assets/logo.svg"         "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
-
-# Plymouth boot splash theme (ROADMAP #7). Sets the theme so the initramfs built
-# later in make-iso picks it up; `splash` is added to the boot cmdline there.
+# Brand assets — nice UI: wallpapers + icons + Plymouth
+mkdir -p "$ROOTFS/usr/share/backgrounds/deposit" "$ROOTFS/usr/share/pixmaps" \
+         "$ROOTFS/usr/share/icons/hicolor/scalable/apps"
+cp "$REPO_ROOT/assets/logo.svg"              "$ROOTFS/usr/share/pixmaps/deposit-logo.svg"
+cp "$REPO_ROOT/assets/gear.svg"               "$ROOTFS/usr/share/pixmaps/deposit-gear.svg"
+cp "$REPO_ROOT/assets/deposit-turbo.svg"      "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
+cp "$REPO_ROOT/assets/logo.svg"               "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
+# Beta wallpapers — light/dark/abstract (nice backgrounds)
+for wp in wallpaper-light.svg wallpaper-dark.svg wallpaper-abstract.svg; do
+  if [[ -f "$REPO_ROOT/assets/$wp" ]]; then
+    cp "$REPO_ROOT/assets/$wp" "$ROOTFS/usr/share/backgrounds/deposit/$wp"
+  fi
+done
+# Also install as pixmaps for greeter fallback
+cp "$REPO_ROOT/assets/wallpaper-dark.svg"  "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" 2>/dev/null || true
+# Plymouth boot splash theme — spinner with Deposit branding on framebuffer
 chroot "$ROOTFS" /bin/bash -c 'plymouth-set-default-theme spinner 2>/dev/null || true' || true
-# Ensure a framebuffer is available in the initramfs for the splash.
+# Plymouth text + logo (nice UI during boot: show Beta version)
+mkdir -p "$ROOTFS/usr/share/plymouth/themes/spinner"
+if [[ -f "$REPO_ROOT/assets/logo.svg" ]]; then
+  cp "$REPO_ROOT/assets/logo.svg" "$ROOTFS/usr/share/plymouth/themes/spinner/watermark.png" 2>/dev/null || true
+fi
 mkdir -p "$ROOTFS/etc/initramfs-tools/conf.d"
 echo "FRAMEBUFFER=y" > "$ROOTFS/etc/initramfs-tools/conf.d/splash"
+# LightDM greeter (nice UI: dark wallpaper on login, rounded greeter)
+mkdir -p "$ROOTFS/etc/lightdm"
+cat > "$ROOTFS/etc/lightdm/lightdm-gtk-greeter.conf" <<GREETER
+[greeter]
+background=/usr/share/backgrounds/deposit/wallpaper-dark.svg
+theme-name=Materia
+icon-theme-name=Papirus
+font-name=Noto Sans 11
+xft-antialias=true
+xft-hintstyle=hintslight
+position=50%,center 50%,center
+clock-format=%a, %d %b  %H:%M
+indicators=~host;~spacer;~clock;~spacer;~power
+GREETER
 
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
 # This is what makes "boot the OS" land on the Deposit OS desktop.
@@ -480,20 +522,96 @@ chroot "$ROOTFS" /bin/bash -c '
 # must show a real login screen on a regular computer. CI enables autologin for
 # screenshots only (ci/inject-autologin.sh), on a throwaway copy of the media.
 
-# Branded desktop wallpaper (XFCE) — show the Deposit logo on first boot.
+# Branded desktop wallpaper (XFCE) — nice backgrounds for Beta 0.1.0.7
+# Light wallpaper on desktop, dark on greeter; both are in /usr/share/backgrounds/deposit.
+mkdir -p "$ROOTFS/usr/share/backgrounds/deposit"
 cat > "$XCONF/xfce4-desktop.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-desktop" version="1.0">
   <property name="backdrop" type="empty">
     <property name="screen0" type="empty">
       <property name="monitor0" type="empty">
-        <property name="image-path" type="string" value="/usr/share/pixmaps/deposit-logo.svg"/>
+        <property name="image-path" type="string" value="/usr/share/backgrounds/deposit/wallpaper-light.svg"/>
         <property name="image-style" type="int" value="5"/>
+        <property name="color-style" type="int" value="0"/>
+        <property name="color1" type="array">
+          <value type="uint" value="240"/><value type="uint" value="244"/><value type="uint" value="255"/><value type="uint" value="255"/>
+        </property>
+      </property>
+      <property name="monitor1" type="empty">
+        <property name="image-path" type="string" value="/usr/share/backgrounds/deposit/wallpaper-light.svg"/>
+        <property name="image-style" type="int" value="5"/>
+      </property>
+    </property>
+    <property name="desktop-icons" type="empty">
+      <property name="icon-size" type="uint" value="48"/>
+      <property name="show-tooltips" type="bool" value="true"/>
+    </property>
+  </property>
+</channel>
+EOF
+# XFCE panel — nice UI: rounded, translucent, centered (Samsung One UI inspired)
+mkdir -p "$ROOTFS/etc/xdg/xfce4/panel" "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
+cat > "$XCONF/xfce4-panel.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=8;x=960;y=1040"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="false"/>
+      <property name="size" type="uint" value="36"/>
+      <property name="background-style" type="uint" value="0"/>
+      <property name="background-color" type="array">
+        <value type="uint" value="255"/><value type="uint" value="255"/><value type="uint" value="255"/><value type="uint" value="230"/>
+      </property>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.94"/><value type="double" value="0.94"/><value type="double" value="1.0"/><value type="double" value="0.92"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/><value type="int" value="4"/>
       </property>
     </property>
   </property>
 </channel>
 EOF
+# GTK tweaks — nice UI: larger rounded corners, smooth fonts
+cat > "$XCONF/xsettings.xml" <<'EOF2'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Materia"/>
+    <property name="IconThemeName" type="string" value="Papirus"/>
+    <property name="DoubleClickTime" type="int" value="400"/>
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="Antialias" type="int" value="1"/>
+    <property name="Hinting" type="int" value="1"/>
+    <property name="HintStyle" type="string" value="hintslight"/>
+    <property name="RGBA" type="string" value="rgb"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="FontName" type="string" value="Noto Sans 11"/>
+    <property name="MonospaceFontName" type="string" value="Noto Sans Mono 11"/>
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+    <property name="CursorSize" type="int" value="24"/>
+    <property name="DecorationLayout" type="string" value="menu:minimize,maximize,close"/>
+    <property name="DialogsUseHeader" type="bool" value="true"/>
+  </property>
+</channel>
+EOF2
+# Version watermark on the desktop (nice touch for Beta)
+mkdir -p "$ROOTFS/etc/skel/Desktop"
+cat > "$ROOTFS/etc/skel/Desktop/README-Beta.desktop" <<DESK
+[Desktop Entry]
+Type=Link
+Name=Welcome to Deposit OS Beta 0.1.0.7
+Comment=Beta 0.1.0.7 — nice UI, 80MB kernel, x86_64 + arm64, Ubuntu compat
+URL=https://example.invalid/deposit-os
+Icon=deposit-logo
+DESK
 
 # Strip the cross-build interpreter so the shipped image stays clean.
 if (( CROSS )); then

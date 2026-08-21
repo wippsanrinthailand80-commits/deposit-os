@@ -14,7 +14,9 @@
 # --- Distro identity -------------------------------------------------------
 DEPOSIT_NAME="deposit"
 DEPOSIT_PRETTY="Deposit OS"
-DEPOSIT_VERSION="0.1.0"
+DEPOSIT_PRETTY_BETA="Deposit OS Beta"
+DEPOSIT_VERSION="0.1.0.7"
+DEPOSIT_VERSION_CODENAME="beta"
 DEPOSIT_ID="deposit"
 DEPOSIT_ID_LIKE="ubuntu debian"          # tells .deb tooling we are compatible
 DEPOSIT_HOME_URL="https://example.invalid/deposit-os"

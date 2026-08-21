@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-label="Deposit OS Beta Wallpaper Light">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0f4ff"/>
+      <stop offset="50%" stop-color="#e6eeff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+    <radialGradient id="blob1" cx="30%" cy="25%" r="55%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blob2" cx="78%" cy="72%" r="60%">
+      <stop offset="0%" stop-color="#5b6ef5" stop-opacity="0.26"/>
+      <stop offset="100%" stop-color="#5b6ef5" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blob3" cx="55%" cy="85%" r="45%">
+      <stop offset="0%" stop-color="#22a8c8" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#22a8c8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="logoG" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2dd4bf"/>
+      <stop offset="55%" stop-color="#22a8c8"/>
+      <stop offset="100%" stop-color="#5b6ef5"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#0b1020" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect width="1920" height="1080" fill="url(#blob1)"/>
+  <rect width="1920" height="1080" fill="url(#blob2)"/>
+  <rect width="1920" height="1080" fill="url(#blob3)"/>
+  <!-- subtle grid -->
+  <g opacity="0.04" stroke="#0b1020" stroke-width="1">
+    <path d="M0 180 H1920 M0 360 H1920 M0 540 H1920 M0 720 H1920 M0 900 H1920"/>
+    <path d="M320 0 V1080 M640 0 V1080 M960 0 V1080 M1280 0 V1080 M1600 0 V1080"/>
+  </g>
+  <!-- centered logo card -->
+  <g transform="translate(960,460)">
+    <rect x="-140" y="-140" width="280" height="280" rx="64" fill="url(#logoG)" filter="url(#soft)"/>
+    <path d="M -48 -18 q 48 -42 96 0" fill="none" stroke="white" stroke-width="18" stroke-linecap="round" opacity="0.96"/>
+    <rect x="-62" y="22" width="124" height="28" rx="14" fill="white" opacity="0.96"/>
+    <circle cx="0" cy="62" r="11" fill="white" opacity="0.92"/>
+  </g>
+  <text x="960" y="680" text-anchor="middle" font-family="Noto Sans, sans-serif" font-size="42" font-weight="700" fill="#1e293b" opacity="0.92">Deposit OS</text>
+  <text x="960" y="718" text-anchor="middle" font-family="Noto Sans, sans-serif" font-size="18" font-weight="600" fill="#64748b" letter-spacing="6">BETA 0.1.0.7</text>
+  <text x="960" y="748" text-anchor="middle" font-family="Noto Sans, sans-serif" font-size="13" fill="#94a3b8" opacity="0.9">From-the-kernel • apt/.deb compatible • Samsung One UI inspired</text>
+</svg>
