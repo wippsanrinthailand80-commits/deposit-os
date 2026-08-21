@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# inject-autologin.sh <mounted-root> <user>
+# inject-autologin.sh <mounted-root> <user> [conf-name]
 #
-# CI-ONLY: enable lightdm autologin so workflow screenshots reach the desktop.
-# This is deliberately NEVER baked into the shipped rootfs / image / installer —
-# a real computer must show a login screen. We edit files directly (no chroot)
-# so it also works on a foreign-arch root (e.g. an arm64 image mounted on x86).
+# CI/live-boot-channel helper: enable lightdm autologin.
+#   default conf "ci-autologin.conf"        -> CI screenshots only (throwaway
+#                                              copies; shipped media untouched)
+#   conf "50-deposit-autologin.conf"        -> LIVE-BOOT CHANNEL media: boots
+#                                              straight to the desktop, and
+#                                              deposit-oobe REMOVES this exact
+#                                              file once first-boot setup
+#                                              completes, so an installed
+#                                              system self-heals back to the
+#                                              audited login screen (#15).
+# We edit files directly (no chroot) so it also works on a foreign-arch root.
 set -euo pipefail
 
 MNT="${1:?mounted root path}"
 USER="${2:?username}"
+CONF="${3:-ci-autologin.conf}"
 
 mkdir -p "$MNT/etc/lightdm/lightdm.conf.d"
-cat > "$MNT/etc/lightdm/lightdm.conf.d/ci-autologin.conf" <<EOF
+cat > "$MNT/etc/lightdm/lightdm.conf.d/$CONF" <<EOF
 [Seat:*]
 autologin-user=$USER
 autologin-user-timeout=0

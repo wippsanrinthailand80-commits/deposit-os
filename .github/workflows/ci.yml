@@ -272,6 +272,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN: ${{ github.run_id }}
         run: bash ci/publish-release.sh build/output/deposit-os.iso deposit.os.mlpds
+
+      # ---- LIVE-BOOT CHANNEL (same run, same pipeline, separate media) -----
+      # Derives an auto-login variant of the ISO from the ALREADY-published
+      # secure rootfs: injects 50-deposit-autologin.conf (which deposit-oobe
+      # removes after first-boot setup on installed systems) and rebuilds the
+      # squashfs. The secure ISO above and the uploaded .mlpds are untouched.
+      - name: build LIVE-BOOT channel ISO (auto-login)
+        continue-on-error: true
+        run: |
+          sudo bash ci/inject-autologin.sh build/output/rootfs deposit 50-deposit-autologin.conf
+          sudo bash ci/make-iso.sh build/output/rootfs build/output/kernel \
+            build/output/deposit-os-live-autologin.iso
+      - name: upload LIVE-BOOT ISO artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-os-live-autologin.iso
+          path: build/output/deposit-os-live-autologin.iso
+          if-no-files-found: warn
+      - name: publish LIVE-BOOT ISO to continuous-liveboot release
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.run_id }}
+          DEPOSIT_RELEASE_TAG: continuous-liveboot
+        run: bash ci/publish-release.sh build/output/deposit-os-live-autologin.iso "" deposit-os-live-autologin.iso
       - name: report failure
         if: failure()
         env:
@@ -339,6 +365,31 @@ jobs:
           name: deposit-arm64.img
           path: build/output/deposit-arm64.img
           if-no-files-found: warn
+      # LIVE-BOOT CHANNEL (arm64): variant copy with autologin baked; the
+      # secure image above stays untouched for the main channel.
+      - name: build LIVE-BOOT channel ARM64 image (auto-login copy)
+        continue-on-error: true
+        run: |
+          cp build/output/deposit-arm64.img build/output/deposit-arm64-live-autologin.img
+          DEV="$(sudo losetup -f --show --partscan build/output/deposit-arm64-live-autologin.img)"
+          MNT="$(mktemp -d)"
+          sudo mount "${DEV}p2" "$MNT"
+          sudo bash ci/inject-autologin.sh "$MNT" deposit 50-deposit-autologin.conf
+          sudo umount "$MNT"; rmdir "$MNT"; sudo losetup -d "$DEV"
+      - name: upload LIVE-BOOT ARM64 image artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-arm64-live-autologin.img
+          path: build/output/deposit-arm64-live-autologin.img
+          if-no-files-found: warn
+      - name: publish LIVE-BOOT ARM64 to continuous-liveboot release
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.run_id }}
+          DEPOSIT_RELEASE_TAG: continuous-liveboot
+        run: bash ci/publish-release.sh build/output/deposit-arm64-live-autologin.img "" deposit-arm64-live-autologin.img
       - name: smoke-boot ARM64 image (UEFI + GRUB, CI autologin)
         continue-on-error: true
         run: |

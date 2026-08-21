@@ -8,11 +8,13 @@ set -uo pipefail
 
 ISO="${1:-build/output/deposit-os.iso}"
 [ -f "$ISO" ] || { echo "[release] no ISO at $ISO; skipping"; exit 0; }
+# Asset filename inside the release (3rd arg). Defaults to the classic name.
+ASSET="${3:-deposit-os.iso}"
 
 API="https://api.github.com/repos/$GITHUB_REPOSITORY"
 TOKEN="$GITHUB_TOKEN"
-# Channel override: main publishes to "continuous"; other refs (e.g. the
-# live-autologin branch) set DEPOSIT_RELEASE_TAG so channels never collide.
+# Channel override: main publishes to "continuous"; the LIVE-BOOT channel
+# (same run, same pipeline) sets DEPOSIT_RELEASE_TAG=continuous-liveboot.
 TAG="${DEPOSIT_RELEASE_TAG:-continuous}"
 RUN="${RUN:-unknown}"
 
@@ -37,7 +39,7 @@ UP=$(echo "$REL" | python3 -c "import sys,json;print(json.load(sys.stdin).get('u
 RESP=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"$ISO" \
-  "$UP?name=deposit-os.iso")
+  "$UP?name=$ASSET")
 echo "$RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print('[release] iso ->',d.get('browser_download_url') or d.get('message'))" 2>/dev/null \
   || echo "[release] iso upload http error"
 # also publish the .mlpds package if present
