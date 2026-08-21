@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# deposit-compat — Ubuntu compat layer helper for Deposit OS (Path 1).
+# Shows which older-Ubuntu libs are present and helps diagnose .deb compat.
+# Usage:
+#   deposit-compat           # status
+#   deposit-compat check     # ld.so view
+#   deposit-compat install <pkg>  # try apt -t jammy/focal install
+set -u
+compat_pin="/etc/apt/preferences.d/99-compat-pin"
+jammy_list="/etc/apt/sources.list.d/jammy-compat.list"
+focal_list="/etc/apt/sources.list.d/focal-compat.list"
+
+status() {
+  echo "Deposit OS — Ubuntu compat (Path 1: single noble ISO + jammy/focal libs)"
+  echo "Suite: $(grep -h '^ID_LIKE' /etc/os-release 2>/dev/null || echo 'unknown')  Noble base: $(grep -h VERSION_ID /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"')"
+  echo
+  if [ -f "$compat_pin" ]; then echo "[ok] pin: $compat_pin"; cat "$compat_pin" | sed 's/^/  /'; else echo "[off] pin missing (compat disabled)"; fi
+  echo
+  if [ -f "$jammy_list" ]; then echo "[ok] jammy sources:"; cat "$jammy_list" | sed 's/^/  /'; else echo "[off] jammy sources missing"; fi
+  echo
+  if [ -f "$focal_list" ]; then echo "[ok] focal sources:"; cat "$focal_list" | sed 's/^/  /'; else echo "[off] focal sources missing"; fi
+  echo
+  echo "Installed compat libs (ldconfig):"
+  ldconfig -p 2>/dev/null | grep -E 'libssl\.so\.1\.1|libicu.*\.so\.66|libicu.*\.so\.70|libffi\.so\.7' | sed 's/^/  /' || echo "  (none of the classic old sonames found — may still be ok, check with 'deposit-compat check')"
+  echo
+  echo "Noble libs (should be present):"
+  ldconfig -p 2>/dev/null | grep -E 'libssl\.so\.3|libicu.*\.so\.74|libffi\.so\.8' | head -5 | sed 's/^/  /' || echo "  (not found)"
+  echo
+  echo "Try: deposit-compat check <path-to-binary>  to see missing libs"
+}
+
+check_binary() {
+  bin="$1"
+  if [ ! -f "$bin" ]; then echo "not found: $bin"; exit 1; fi
+  echo "ldd $bin:"
+  ldd "$bin" 2>&1 | tail -40
+  echo
+  echo "Missing libs (if any):"
+  ldd "$bin" 2>&1 | grep "not found" || echo "  (none)"
+}
+
+case "${1:-status}" in
+  status|"") status ;;
+  check) shift; [ -n "${1:-}" ] && check_binary "$1" || status ;;
+  install) shift; echo "Attempting apt install with compat pin (try jammy then focal):"; sudo apt update -qq && sudo apt install -y --no-install-recommends "$@" || echo "try: sudo apt -t jammy install <pkg>  or  sudo apt -t focal install <pkg>" ;;
+  *) echo "Usage: deposit-compat [status|check <binary>|install <pkg>]"; status ;;
+esac

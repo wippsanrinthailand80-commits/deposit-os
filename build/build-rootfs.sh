@@ -139,6 +139,59 @@ if [[ -n "${DEPOSIT_DESKTOP_PKGS:-}" ]]; then
   '
 fi
 
+# --- Stage 3b: Ubuntu compat libs (jammy/focal .debs on noble) ---------------
+# Path 1 delivers "almost 100% installer compat" for runtime: jammy/focal
+# binaries linked against older sonames (libicu70/66, libssl1.1, libffi7)
+# run on noble's newer toolchain because we ship the older libs alongside.
+# We use apt pinning so noble stays 900, jammy/focal are 100 — only the
+# explicitly listed compat libs are pulled, not a full downgrade.
+if [[ "${DEPOSIT_ENABLE_COMPAT:-1}" == "1" ]]; then
+  echo "[rootfs] enabling Ubuntu compat (jammy/focal) -> $ROOTFS"
+  cat > "$ROOTFS/etc/apt/sources.list.d/jammy-compat.list" <<EOF
+deb $MIRROR jammy main universe
+deb $MIRROR jammy-updates main universe
+deb $MIRROR jammy-security main universe
+EOF
+  cat > "$ROOTFS/etc/apt/sources.list.d/focal-compat.list" <<EOF
+deb $MIRROR focal main universe
+deb $MIRROR focal-updates main universe
+deb $MIRROR focal-security main universe
+EOF
+  cat > "$ROOTFS/etc/apt/preferences.d/99-compat-pin" <<EOF
+Package: *
+Pin: release n=$DEPOSIT_SUITE
+Pin-Priority: 900
+
+Package: *
+Pin: release n=jammy
+Pin-Priority: 100
+
+Package: *
+Pin: release n=focal
+Pin-Priority: 100
+EOF
+  cat > "$ROOTFS/tmp/setup-compat.sh" <<EOF
+#!/usr/bin/env bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
+APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+apt-get \$APT_OPTS update -qq || echo "WARN: compat apt update issue"
+if [ -n "$DEPOSIT_COMPAT_JAMMY_PKGS" ]; then
+  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_COMPAT_JAMMY_PKGS || echo "WARN: jammy compat install issue"
+fi
+if [ -n "$DEPOSIT_COMPAT_FOCAL_PKGS" ]; then
+  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_COMPAT_FOCAL_PKGS || echo "WARN: focal compat install issue"
+fi
+ldconfig 2>/dev/null || true
+EOF
+  chmod +x "$ROOTFS/tmp/setup-compat.sh"
+  chroot "$ROOTFS" /tmp/setup-compat.sh || echo "WARN: compat script issue"
+  rm -f "$ROOTFS/tmp/setup-compat.sh"
+else
+  echo "[rootfs] compat disabled (DEPOSIT_ENABLE_COMPAT=0)"
+  rm -f "$ROOTFS/etc/apt/sources.list.d/jammy-compat.list" "$ROOTFS/etc/apt/sources.list.d/focal-compat.list" "$ROOTFS/etc/apt/preferences.d/99-compat-pin" 2>/dev/null || true
+fi
+
 # --- Stage 4: light first-boot setup (no systemd bloat on old HW) -----------
 # Provide a simple, fast getty + network-online target. Keep services minimal.
 chroot "$ROOTFS" /bin/bash -c '
@@ -257,12 +310,13 @@ cp "$REPO_ROOT/tools/deposit-updater"       "$ROOTFS/usr/local/bin/deposit-updat
 cp "$REPO_ROOT/tools/deposit-store"         "$ROOTFS/usr/local/bin/deposit-store"
 cp "$REPO_ROOT/tools/deposit-oobe"          "$ROOTFS/usr/local/bin/deposit-oobe"
 cp "$REPO_ROOT/tools/deposit-settings"       "$ROOTFS/usr/local/bin/deposit-settings"
+cp "$REPO_ROOT/tools/deposit-compat"         "$ROOTFS/usr/local/bin/deposit-compat"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
          "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \
          "$ROOTFS/usr/local/bin/deposit-security" "$ROOTFS/usr/local/bin/deposit-updater" \
          "$ROOTFS/usr/local/bin/deposit-store" "$ROOTFS/usr/local/bin/deposit-oobe" \
-         "$ROOTFS/usr/local/bin/deposit-settings"
+         "$ROOTFS/usr/local/bin/deposit-settings" "$ROOTFS/usr/local/bin/deposit-compat"
 
 # Desktop entry for the file manager.
 mkdir -p "$ROOTFS/usr/share/applications"

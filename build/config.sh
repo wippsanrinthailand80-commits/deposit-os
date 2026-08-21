@@ -38,6 +38,17 @@ DEPOSIT_MIRROR="${DEPOSIT_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 DEPOSIT_PORTS_MIRROR="${DEPOSIT_PORTS_MIRROR:-http://ports.ubuntu.com/ubuntu-ports}"
 DEPOSIT_COMPONENTS="${DEPOSIT_COMPONENTS:-main,universe}"
 
+# --- Ubuntu compat (Path 1: single noble ISO runs jammy/focal .debs) --------
+# Noble (glibc 2.39) is forward-compatible with binaries linked against older
+# suites. Installing the older sonames alongside noble lets jammy/focal debs
+# run without a separate ISO. Keep this minimal; extend via DEPOSIT_COMPAT_*.
+DEPOSIT_ENABLE_COMPAT="${DEPOSIT_ENABLE_COMPAT:-1}"
+# Jammy (22.04 LTS, supported to 2027): libicu70 is the main soname bump.
+DEPOSIT_COMPAT_JAMMY_PKGS="${DEPOSIT_COMPAT_JAMMY_PKGS:-libicu70}"
+# Focal (20.04 LTS, ESM to 2030): openssl 1.1 + icu66 + libffi7 cover most
+# binary compat failures. These coexist with noble's libssl3/libicu74/libffi8.
+DEPOSIT_COMPAT_FOCAL_PKGS="${DEPOSIT_COMPAT_FOCAL_PKGS:-libssl1.1 libicu66 libffi7}"
+
 # Minimal, apt-capable base. debootstrap --variant=minbase already pulls the
 # essential toolchain; these are added on top.
 DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
