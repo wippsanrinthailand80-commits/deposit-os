@@ -11,7 +11,9 @@ ISO="${1:-build/output/deposit-os.iso}"
 
 API="https://api.github.com/repos/$GITHUB_REPOSITORY"
 TOKEN="$GITHUB_TOKEN"
-TAG="continuous"
+# Channel override: main publishes to "continuous"; other refs (e.g. the
+# live-autologin branch) set DEPOSIT_RELEASE_TAG so channels never collide.
+TAG="${DEPOSIT_RELEASE_TAG:-continuous}"
 RUN="${RUN:-unknown}"
 
 # remove any previous continuous release + tag
