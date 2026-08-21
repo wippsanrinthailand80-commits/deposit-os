@@ -328,16 +328,25 @@ jobs:
           name: deposit-arm64.img
           path: build/output/deposit-arm64.img
           if-no-files-found: warn
-      - name: smoke-boot ARM64 image (UEFI + GRUB)
+      - name: smoke-boot ARM64 image (UEFI + GRUB, CI autologin)
         continue-on-error: true
         run: |
           IMG="build/output/deposit-arm64.img"
+          BOOT="/tmp/arm64-boot.img"
           BIOS="/usr/share/qemu-efi-aarch64/QEMU_EFI.fd"
           [ -f "$BIOS" ] || BIOS="$(ls /usr/share/*/QEMU_EFI.fd 2>/dev/null | head -1)"
+          cp "$IMG" "$BOOT"
+          # CI-ONLY: enable autologin on a throwaway copy so the screenshot
+          # reaches the desktop. The shipped image keeps a real login screen.
+          DEV="$(sudo losetup -f --show --partscan "$BOOT")"
+          MNT="$(mktemp -d)"
+          sudo mount "${DEV}p2" "$MNT"
+          sudo bash ci/inject-autologin.sh "$MNT" deposit
+          sudo umount "$MNT"; rmdir "$MNT"; sudo losetup -d "$DEV"
           qemu-system-aarch64 -M virt -cpu max -m 2048 -smp 2 \
-            -drive file="$IMG",if=virtio,format=raw \
+            -drive file="$BOOT",if=virtio,format=raw \
             -bios "$BIOS" -vnc :2 -qmp tcp:127.0.0.1:4446,server,nowait -daemonize
-          sleep 60
+          sleep 150
           python3 ci/qmp_screendump.py /tmp/arm64-boot.png 127.0.0.1 4446 || true
           pkill -f qemu-system-aarch64 || true
           ls -l /tmp/arm64-boot.png 2>/dev/null || echo "no boot png"

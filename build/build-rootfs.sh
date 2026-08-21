@@ -422,13 +422,9 @@ chroot "$ROOTFS" /bin/bash -c '
   systemctl enable lightdm 2>/dev/null || true
   systemctl enable bluetooth 2>/dev/null || true
 '
-mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
-cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-deposit-autologin.conf" <<EOF
-[Seat:*]
-autologin-user=$DEPOSIT_DEFAULT_USER
-autologin-user-timeout=0
-autologin-session=xfce
-EOF
+# NOTE: autologin is intentionally NOT baked here. The shipped image/installer
+# must show a real login screen on a regular computer. CI enables autologin for
+# screenshots only (ci/inject-autologin.sh), on a throwaway copy of the media.
 
 # Branded desktop wallpaper (XFCE) — show the Deposit logo on first boot.
 cat > "$XCONF/xfce4-desktop.xml" <<'EOF'

@@ -16,6 +16,14 @@ OUT="$REPO/build/output/deposit-disk.img"
 echo "[live] building disk image"
 bash ci/make-disk.sh "$ROOTFS" "$KERNEL" "$OUT" 4096
 
+# CI-ONLY: enable autologin on a throwaway copy of the disk so the screenshot
+# reaches the desktop. The shipped .mlpds installer keeps a real login screen.
+echo "[live] injecting CI autologin into disk image"
+MNT="$(mktemp -d)"
+sudo mount -o loop "$OUT" "$MNT"
+sudo bash ci/inject-autologin.sh "$MNT" deposit
+sudo umount "$MNT"; rmdir "$MNT"
+
 VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
 [[ -n "$VMLINUZ" ]] || { echo "[live] no vmlinuz found"; exit 1; }
 echo "[live] kernel: $VMLINUZ"
