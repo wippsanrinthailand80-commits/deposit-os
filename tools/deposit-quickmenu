@@ -136,16 +136,16 @@ def security_status():
 
 
 CSS = """
-window { background-color: rgba(244,244,247,0.97); border-radius: 20px; }
+window { background-color: rgba(246,244,252,0.97); border-radius: 20px; }
 .header { font-size: 15px; font-weight: 700; color: #1c1c28; }
-.tile { border-radius: 14px; background-color: #e9e9ef; padding: 12px 6px;
+.tile { border-radius: 14px; background-color: #ece8f8; padding: 12px 6px;
         color: #1c1c28; }
 .tile label { font-weight: 600; }
-.tile.active { background-color: #3b6dff; color: #ffffff; }
+.tile.active { background-color: #7c3aed; color: #ffffff; }
 .rowlabel { color: #555; font-weight: 600; }
 scale { min-height: 22px; }
-scale trough { background: #d6d6de; border-radius: 6px; }
-scale highlight { background: #3b6dff; border-radius: 6px; }
+scale trough { background: #ddd6f3; border-radius: 6px; }
+scale highlight { background: #7c3aed; border-radius: 6px; }
 .note { color: #999; }
 """
 

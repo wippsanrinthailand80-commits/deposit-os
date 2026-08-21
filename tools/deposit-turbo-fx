@@ -36,7 +36,7 @@ class TurboFX(Gtk.Window):
         self.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
         self.set_app_paintable(True)
 
-        css = b"window{background-color:rgba(18,18,26,0.84);border-radius:22px;}"
+        css = b"window{background-color:rgba(22,14,44,0.86);border-radius:22px;}"
         prov = Gtk.CssProvider()
         prov.load_from_data(css)
         Gtk.StyleContext.add_provider_for_screen(

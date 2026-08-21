@@ -120,17 +120,17 @@ def about_text():
 
 
 CSS = """
-window { background-color: #eef0f5; }
+window { background-color: #f4f2fb; }
 .card { background-color: #ffffff; border-radius: 18px; }
 .header { font-size: 17px; font-weight: 700; color: #1c1c28; }
-.row { padding: 12px 14px; border-bottom: 1px solid #eef0f5; }
+.row { padding: 12px 14px; border-bottom: 1px solid #f0edfa; }
 .row:last-child { border-bottom: none; }
 .title { font-weight: 600; color: #1c1c28; font-size: 14px; }
 .sub { color: #8a8f9c; font-size: 11px; }
-.gear { color: #3b6dff; }
+.gear { color: #7c3aed; }
 scale { min-height: 20px; }
-scale trough { background: #dfe2ea; border-radius: 6px; }
-scale highlight { background: #3b6dff; border-radius: 6px; }
+scale trough { background: #e7e3fa; border-radius: 6px; }
+scale highlight { background: #7c3aed; border-radius: 6px; }
 """
 
 

@@ -127,7 +127,7 @@ echo "$DEPOSIT_VERSION_CODENAME" > "$ROOTFS/etc/deposit-channel" 2>/dev/null || 
 cat > "$ROOTFS/etc/update-motd.d/00-deposit-beta" <<MOTD
 #!/bin/sh
 echo ""
-echo "  ◆ Deposit OS Beta $DEPOSIT_VERSION — nice UI, nice backgrounds, x86_64 + arm64"
+echo "  ◆ Deposit OS Beta $DEPOSIT_VERSION — Andromeda (purple-blue) · x86_64 + arm64"
 echo "  ◆ Kernel ~80MB • Ubuntu compat (jammy/focal) • Samsung One UI inspired"
 echo ""
 MOTD
@@ -446,16 +446,24 @@ cat > "$XCONF/xsettings.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xsettings" version="1.0">
   <property name="Net" type="empty">
-    <property name="ThemeName" type="string" value="Materia"/>
-    <property name="IconThemeName" type="string" value="Papirus"/>
+    <property name="ThemeName" type="string" value="Materia-dark"/>
+    <property name="IconThemeName" type="string" value="Papirus-Dark"/>
     <property name="DoubleClickTime" type="int" value="400"/>
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="Antialias" type="int" value="1"/>
+    <property name="Hinting" type="int" value="1"/>
+    <property name="HintStyle" type="string" value="hintslight"/>
+    <property name="RGBA" type="string" value="rgb"/>
   </property>
   <property name="Gtk" type="empty">
     <property name="FontName" type="string" value="Noto Sans 11"/>
     <property name="MonospaceFontName" type="string" value="Noto Sans Mono 11"/>
     <property name="CursorThemeName" type="string" value="Adwaita"/>
-    <property name="CursorSize" type="int" value="0"/>
+    <property name="CursorSize" type="int" value="24"/>
     <property name="DecorationLayout" type="string" value="menu:minimize,maximize,close"/>
+    <property name="DialogsUseHeader" type="bool" value="true"/>
   </property>
 </channel>
 EOF
@@ -463,7 +471,7 @@ cat > "$XCONF/xfwm4.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
-    <property name="theme" type="string" value="Materia"/>
+    <property name="theme" type="string" value="Materia-dark"/>
     <property name="title_font" type="string" value="Noto Sans Bold 11"/>
     <property name="button_layout" type="string" value="O|HMC"/>
     <property name="round_edges" type="bool" value="true"/>
@@ -471,6 +479,8 @@ cat > "$XCONF/xfwm4.xml" <<'EOF'
   </property>
 </channel>
 EOF
+# NOTE: xsettings is written exactly once here (Materia-dark + Papirus-Dark to match
+# the Andromeda purple-blue theme). Do not add a second writer below.
 # Brand assets — nice UI: wallpapers + icons + Plymouth
 mkdir -p "$ROOTFS/usr/share/backgrounds/deposit" "$ROOTFS/usr/share/pixmaps" \
          "$ROOTFS/usr/share/icons/hicolor/scalable/apps"
@@ -478,14 +488,14 @@ cp "$REPO_ROOT/assets/logo.svg"              "$ROOTFS/usr/share/pixmaps/deposit-
 cp "$REPO_ROOT/assets/gear.svg"               "$ROOTFS/usr/share/pixmaps/deposit-gear.svg"
 cp "$REPO_ROOT/assets/deposit-turbo.svg"      "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
 cp "$REPO_ROOT/assets/logo.svg"               "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
-# Beta wallpapers — light/dark/abstract (nice backgrounds)
-for wp in wallpaper-light.svg wallpaper-dark.svg wallpaper-abstract.svg; do
+# Beta wallpapers — Andromeda (hero), light/dark/abstract alternates
+for wp in wallpaper-andromeda.svg wallpaper-light.svg wallpaper-dark.svg wallpaper-abstract.svg; do
   if [[ -f "$REPO_ROOT/assets/$wp" ]]; then
     cp "$REPO_ROOT/assets/$wp" "$ROOTFS/usr/share/backgrounds/deposit/$wp"
   fi
 done
-# Also install as pixmaps for greeter fallback
-cp "$REPO_ROOT/assets/wallpaper-dark.svg"  "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" 2>/dev/null || true
+# Also install as pixmaps for greeter fallback (Andromeda is the hero art)
+cp "$REPO_ROOT/assets/wallpaper-andromeda.svg" "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" 2>/dev/null || true
 # Plymouth boot splash theme — spinner with Deposit branding on framebuffer
 chroot "$ROOTFS" /bin/bash -c 'plymouth-set-default-theme spinner 2>/dev/null || true' || true
 # Plymouth text + logo (nice UI during boot: show Beta version)
@@ -499,9 +509,9 @@ echo "FRAMEBUFFER=y" > "$ROOTFS/etc/initramfs-tools/conf.d/splash"
 mkdir -p "$ROOTFS/etc/lightdm"
 cat > "$ROOTFS/etc/lightdm/lightdm-gtk-greeter.conf" <<GREETER
 [greeter]
-background=/usr/share/backgrounds/deposit/wallpaper-dark.svg
-theme-name=Materia
-icon-theme-name=Papirus
+background=/usr/share/backgrounds/deposit/wallpaper-andromeda.svg
+theme-name=Materia-dark
+icon-theme-name=Papirus-Dark
 font-name=Noto Sans 11
 xft-antialias=true
 xft-hintstyle=hintslight
@@ -522,24 +532,22 @@ chroot "$ROOTFS" /bin/bash -c '
 # must show a real login screen on a regular computer. CI enables autologin for
 # screenshots only (ci/inject-autologin.sh), on a throwaway copy of the media.
 
-# Branded desktop wallpaper (XFCE) — nice backgrounds for Beta 0.1.0.7
-# Light wallpaper on desktop, dark on greeter; both are in /usr/share/backgrounds/deposit.
-mkdir -p "$ROOTFS/usr/share/backgrounds/deposit"
+# Branded desktop wallpaper (XFCE) — Andromeda hero art, purple-blue theme
 cat > "$XCONF/xfce4-desktop.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-desktop" version="1.0">
   <property name="backdrop" type="empty">
     <property name="screen0" type="empty">
       <property name="monitor0" type="empty">
-        <property name="image-path" type="string" value="/usr/share/backgrounds/deposit/wallpaper-light.svg"/>
+        <property name="image-path" type="string" value="/usr/share/backgrounds/deposit/wallpaper-andromeda.svg"/>
         <property name="image-style" type="int" value="5"/>
         <property name="color-style" type="int" value="0"/>
         <property name="color1" type="array">
-          <value type="uint" value="240"/><value type="uint" value="244"/><value type="uint" value="255"/><value type="uint" value="255"/>
+          <value type="uint" value="11"/><value type="uint" value="7"/><value type="uint" value="36"/><value type="uint" value="255"/>
         </property>
       </property>
       <property name="monitor1" type="empty">
-        <property name="image-path" type="string" value="/usr/share/backgrounds/deposit/wallpaper-light.svg"/>
+        <property name="image-path" type="string" value="/usr/share/backgrounds/deposit/wallpaper-andromeda.svg"/>
         <property name="image-style" type="int" value="5"/>
       </property>
     </property>
@@ -550,7 +558,7 @@ cat > "$XCONF/xfce4-desktop.xml" <<'EOF'
   </property>
 </channel>
 EOF
-# XFCE panel — nice UI: rounded, translucent, centered (Samsung One UI inspired)
+# XFCE panel — nice UI: translucent deep-purple glass over the galaxy
 mkdir -p "$ROOTFS/etc/xdg/xfce4/panel" "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
 cat > "$XCONF/xfce4-panel.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -564,10 +572,10 @@ cat > "$XCONF/xfce4-panel.xml" <<'EOF'
       <property name="size" type="uint" value="36"/>
       <property name="background-style" type="uint" value="0"/>
       <property name="background-color" type="array">
-        <value type="uint" value="255"/><value type="uint" value="255"/><value type="uint" value="255"/><value type="uint" value="230"/>
+        <value type="uint" value="18"/><value type="uint" value="14"/><value type="uint" value="42"/><value type="uint" value="235"/>
       </property>
       <property name="background-rgba" type="array">
-        <value type="double" value="0.94"/><value type="double" value="0.94"/><value type="double" value="1.0"/><value type="double" value="0.92"/>
+        <value type="double" value="0.07"/><value type="double" value="0.055"/><value type="double" value="0.165"/><value type="double" value="0.88"/>
       </property>
       <property name="plugin-ids" type="array">
         <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/><value type="int" value="4"/>
@@ -576,39 +584,13 @@ cat > "$XCONF/xfce4-panel.xml" <<'EOF'
   </property>
 </channel>
 EOF
-# GTK tweaks — nice UI: larger rounded corners, smooth fonts
-cat > "$XCONF/xsettings.xml" <<'EOF2'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xsettings" version="1.0">
-  <property name="Net" type="empty">
-    <property name="ThemeName" type="string" value="Materia"/>
-    <property name="IconThemeName" type="string" value="Papirus"/>
-    <property name="DoubleClickTime" type="int" value="400"/>
-    <property name="CursorThemeName" type="string" value="Adwaita"/>
-  </property>
-  <property name="Xft" type="empty">
-    <property name="Antialias" type="int" value="1"/>
-    <property name="Hinting" type="int" value="1"/>
-    <property name="HintStyle" type="string" value="hintslight"/>
-    <property name="RGBA" type="string" value="rgb"/>
-  </property>
-  <property name="Gtk" type="empty">
-    <property name="FontName" type="string" value="Noto Sans 11"/>
-    <property name="MonospaceFontName" type="string" value="Noto Sans Mono 11"/>
-    <property name="CursorThemeName" type="string" value="Adwaita"/>
-    <property name="CursorSize" type="int" value="24"/>
-    <property name="DecorationLayout" type="string" value="menu:minimize,maximize,close"/>
-    <property name="DialogsUseHeader" type="bool" value="true"/>
-  </property>
-</channel>
-EOF2
 # Version watermark on the desktop (nice touch for Beta)
 mkdir -p "$ROOTFS/etc/skel/Desktop"
 cat > "$ROOTFS/etc/skel/Desktop/README-Beta.desktop" <<DESK
 [Desktop Entry]
 Type=Link
-Name=Welcome to Deposit OS Beta 0.1.0.7
-Comment=Beta 0.1.0.7 — nice UI, 80MB kernel, x86_64 + arm64, Ubuntu compat
+Name=Welcome to Deposit OS Beta 0.1.0.7 — Andromeda
+Comment=Beta 0.1.0.7 — Andromeda purple-blue theme, 80MB kernel, x86_64 + arm64, Ubuntu compat
 URL=https://example.invalid/deposit-os
 Icon=deposit-logo
 DESK
