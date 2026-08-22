@@ -230,7 +230,16 @@ chroot "$ROOTFS" /bin/bash -c '
 # Generate a RANDOM initial password and force a change on first login, so the
 # shipped image never carries a known/default credential (closes the OOBE audit
 # gap: SSH and any other auth are unusable until the user sets their own).
-RPW="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
+# NOTE: do NOT write this as 'tr ... | head -c N'. head exits early -> tr dies
+# of SIGPIPE -> with pipefail the whole build aborts right here (this exact
+# line silently truncated every CI rootfs for months). Read a bounded chunk
+# first so every process terminates cleanly.
+_RAND_SRC="$(dd if=/dev/urandom bs=128 count=1 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9' || true)"
+RPW="${_RAND_SRC:0:16}"
+while [[ ${#RPW} -lt 16 ]]; do   # astronomically unlikely; belt & braces
+  _RAND_SRC="$RPW$(dd if=/dev/urandom bs=128 count=1 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9' || true)"
+  RPW="${_RAND_SRC:0:16}"
+done
 if ! chroot "$ROOTFS" id "$DEPOSIT_DEFAULT_USER" >/dev/null 2>&1; then
   chroot "$ROOTFS" useradd -m -s /bin/bash "$DEPOSIT_DEFAULT_USER"
 fi
