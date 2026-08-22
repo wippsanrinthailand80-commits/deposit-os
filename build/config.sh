@@ -53,8 +53,12 @@ DEPOSIT_COMPAT_FOCAL_PKGS="${DEPOSIT_COMPAT_FOCAL_PKGS:-libssl1.1 libicu66 libff
 
 # Minimal, apt-capable base. debootstrap --variant=minbase already pulls the
 # essential toolchain; these are added on top.
+# linux-firmware: WITHOUT these blobs, AMD/NVIDIA/Wi-Fi/BT devices stay dead
+# on real hardware (the #1 "boots but nothing works" gap).
+# microcodes: CPU stability/security fixes for both vendors.
 DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
-  gnupg netplan.io systemd systemd-sysv udev openssh-server vim-tiny curl}"
+  gnupg netplan.io systemd systemd-sysv udev openssh-server vim-tiny curl \
+  linux-firmware amd64-microcode intel-microcode}"
 
 # Optional lightweight desktop (XFCE). Leave empty for a headless/CLI build.
 # xorg + video/input driver metas are required for the GUI to actually start

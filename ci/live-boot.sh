@@ -37,7 +37,7 @@ After=graphical.target lightdm.service
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 75; { echo "=== Deposit OS idle metrics ==="; date -u; echo "-- free -m --"; free -m; echo "-- df -h / --"; df -h /; echo "-- du -sx MB --"; du -sxm /usr /var /etc 2>/dev/null; } > /var/log/deposit-metrics.txt 2>&1'
+ExecStart=/bin/sh -c 'sleep 75; { echo "=== Deposit OS idle metrics ==="; date -u; echo "-- free -m --"; free -m; echo "-- df -h / --"; df -h /; echo "-- du -sx MB --"; du -sxm /usr /var /etc 2>/dev/null; echo; echo "=== boot diagnostics ==="; systemctl is-active lightdm; systemctl status lightdm --no-pager 2>&1 | tail -8; echo "-- journal (lightdm/X/fatal) --"; journalctl -b --no-pager 2>/dev/null | grep -iE "lightdm|xorg|fatal|failed" | tail -25; [ -f /var/log/Xorg.0.log ] && { echo "-- Xorg.0.log tail --"; tail -15 /var/log/Xorg.0.log; }; } > /var/log/deposit-metrics.txt 2>&1'
 
 [Install]
 WantedBy=graphical.target
@@ -84,9 +84,10 @@ pkill -f qemu-system-x86_64 || true
 
 # Harvest the metrics the probe wrote into the image (persistent ext4).
 echo "[live] harvesting resource metrics from image"
-if MNT2="$(mktemp -d)" && mount -o loop,ro "$OUT" "$MNT2" 2>/dev/null; then
-  cp "$MNT2/var/log/deposit-metrics.txt" /tmp/deposit-metrics.txt 2>/dev/null || true
-  umount "$MNT2"; rmdir "$MNT2"
+if MNT2="$(mktemp -d)" && sudo mount -o loop,ro "$OUT" "$MNT2" 2>/dev/null; then
+  sudo cp "$MNT2/var/log/deposit-metrics.txt" /tmp/deposit-metrics.txt 2>/dev/null || true
+  sudo chown "$(id -u):$(id -g)" /tmp/deposit-metrics.txt 2>/dev/null || true
+  sudo umount "$MNT2"; rmdir "$MNT2"
 fi
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
   || echo "[live] no metrics file (probe did not run?)"
