@@ -135,7 +135,11 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends debootstrap
       - name: build rootfs
-        run: sudo bash build/build-rootfs.sh build/output/rootfs 2>&1 | tee /tmp/rootfs.log
+        # pipefail: without it, `| tee` masks a FAILED build-rootfs.sh and a
+        # half-built rootfs gets packaged as "success" (the silent-truncation bug).
+        run: |
+          set -eo pipefail
+          sudo bash build/build-rootfs.sh build/output/rootfs 2>&1 | tee /tmp/rootfs.log
       - name: package rootfs tarball
         # Upload as a single archive: raw rootfs trees contain /dev device nodes
         # that upload-artifact cannot pack.
@@ -353,11 +357,17 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             qemu-efi 2>/dev/null || true
       - name: build ARM64 kernel (cross-compile)
-        run: sudo env DEPOSIT_ARCH=aarch64 bash build/build-kernel.sh 2>&1 | tee /tmp/arm64-kernel.log
+        run: |
+          set -eo pipefail
+          sudo env DEPOSIT_ARCH=aarch64 bash build/build-kernel.sh 2>&1 | tee /tmp/arm64-kernel.log
       - name: build ARM64 rootfs (debootstrap arm64 + qemu second-stage)
-        run: sudo env DEPOSIT_ARCH=aarch64 bash build/build-rootfs.sh 2>&1 | tee /tmp/arm64-rootfs.log
+        run: |
+          set -eo pipefail
+          sudo env DEPOSIT_ARCH=aarch64 bash build/build-rootfs.sh 2>&1 | tee /tmp/arm64-rootfs.log
       - name: build ARM64 UEFI image
-        run: sudo bash ci/make-arm64-image.sh build/output/rootfs build/output/kernel build/output/deposit-arm64.img 4096 2>&1 | tee /tmp/arm64-image.log
+        run: |
+          set -eo pipefail
+          sudo bash ci/make-arm64-image.sh build/output/rootfs build/output/kernel build/output/deposit-arm64.img 4096 2>&1 | tee /tmp/arm64-image.log
       - name: upload ARM64 build logs (debug)
         if: always()
         uses: actions/upload-artifact@v4

@@ -144,7 +144,7 @@ mount_chroot
 chroot "$ROOTFS" /bin/bash -c '
   set -e
   export DEBIAN_FRONTEND=noninteractive
-  export APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+  export APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180 -o Acquire::https::Timeout=180"
   apt-get $APT_OPTS update -qq
   apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_EXTRA_BASE"'
 '
@@ -152,7 +152,7 @@ if [[ -n "${DEPOSIT_DESKTOP_PKGS:-}" ]]; then
   chroot "$ROOTFS" /bin/bash -c '
     set -e
     export DEBIAN_FRONTEND=noninteractive
-    export APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+    export APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180 -o Acquire::https::Timeout=180"
     apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_DESKTOP_PKGS"'
   '
 fi
@@ -192,7 +192,7 @@ EOF
 #!/usr/bin/env bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180 -o Acquire::https::Timeout=180"
 apt-get \$APT_OPTS update -qq || echo "WARN: compat apt update issue"
 if [ -n "$DEPOSIT_COMPAT_JAMMY_PKGS" ]; then
   apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_COMPAT_JAMMY_PKGS || echo "WARN: jammy compat install issue"
@@ -271,7 +271,7 @@ cat > "$ROOTFS/tmp/deposit-extra.sh" <<EOF
 #!/usr/bin/env bash
 # Non-fatal: an unavailable optional package must not break the whole image.
 export DEBIAN_FRONTEND=noninteractive
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180"
 apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THEME_PKGS \
   || echo "WARN: theme install issue"
 apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_APPS \
@@ -421,8 +421,8 @@ X-GNOME-Autostart-enabled=true
 EOF
 
 # --- Stage 5c: quick menu + virus scanner + OS security features ----------
-DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS" apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq
-DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS" apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
+DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS" apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=180 update -qq
+DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS" apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=180 install -y --no-install-recommends \
   clamav clamav-freshclam apparmor apparmor-utils brightnessctl rfkill \
   python3-gi gir1.2-gtk-3.0 wpasupplicant || echo "WARN: security install issue"
 # Deposit tooling: bottom-right quick menu + AV wrapper (launchable in terminal).
@@ -867,6 +867,24 @@ Comment=Beta 0.1.0.7 — Andromeda purple-blue theme, 80MB kernel, x86_64 + arm6
 URL=https://example.invalid/deposit-os
 Icon=deposit-logo
 DESK
+
+# --- Final integrity gate: a truncated build must FAIL loudly ----------------
+# (The silent-truncation bug: a mid-script death used to still produce a
+# "green" artifact missing greeter/tools/firmware. Never again.)
+echo "[rootfs] integrity gate:"
+FAILED=0
+for f in usr/bin/Xorg usr/bin/startxfce4 usr/sbin/lightdm \
+         usr/libexec/lightdm-gtk-greeter usr/sbin/NetworkManager \
+         usr/bin/pulseaudio /usr/local/bin/aqa; do
+  if [[ ! -e "$ROOTFS/$f" ]]; then echo "  MISSING: $f"; FAILED=1; fi
+done
+if [[ -z "$(ls -A "$ROOTFS/usr/lib/firmware" 2>/dev/null)" ]]; then
+  echo "  MISSING: /usr/lib/firmware is empty"; FAILED=1
+fi
+if [[ "$(basename "$(readlink "$ROOTFS/etc/systemd/system/default.target" 2>/dev/null)")" != "graphical.target" ]]; then
+  echo "  MISSING: default.target -> graphical"; FAILED=1; fi
+(( FAILED )) && { echo "[rootfs] FATAL: integrity gate failed"; exit 1; }
+echo "[rootfs] integrity gate: OK"
 
 # Strip the cross-build interpreter so the shipped image stays clean.
 if (( CROSS )); then
