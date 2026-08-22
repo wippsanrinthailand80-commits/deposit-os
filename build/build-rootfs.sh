@@ -349,22 +349,22 @@ if [[ "${DEPOSIT_ALPINE_SUPPORT:-1}" == "1" ]]; then
   echo "[rootfs] fetching apk-tools-static ($ALP_ARCH) for Alpine .apk support"
   IDX="$(mktemp)"
   if curl -fsSL --max-time 45 "$ALP_MIRROR/$ALP_BRANCH/main/$ALP_ARCH/" -o "$IDX"; then
-    APKF="$(grep -o 'apk-tools-static-[^\"]*\.apk' "$IDX" | head -1 || true)"
-    if [[ -n "$APKF" ]]; then
-      mkdir -p "$ROOTFS/usr/local/libexec"
-      curl -fsSL --max-time 90 "$ALP_MIRROR/$ALP_BRANCH/main/$ALP_ARCH/$APKF" -o /tmp/apks.apk \
-      && python3 - /tmp/apks.apk "$ROOTFS/usr/local/libexec/apk.static" <<'PY'
+    APKF="$(grep -o 'apk-tools-static-[^"]*\.apk' "$IDX" | head -1 || true)"
+    if [[ -n "$APKF" ]] && curl -fsSL --max-time 90 "$ALP_MIRROR/$ALP_BRANCH/main/$ALP_ARCH/$APKF" -o /tmp/apks.apk; then
+      # Parser must NEVER kill the build: Alpine may ship v2 (Q1/Q2 sig header)
+      # or v3 (plain concatenated gzip tars). Auto-detect. Non-fatal on failure.
+      if python3 - /tmp/apks.apk "$ROOTFS/usr/local/libexec/apk.static" <<'PYEOF'
 import io, sys, tarfile, zlib
 raw = open(sys.argv[1], "rb").read()
-# v2 layout: "Q1<hex>\nQ2<u32be len><rsa-sig>" then concatenated gzip tars.
-# Parse structurally (never scan for \n inside binary).
-i = raw.index(b"\n") + 1
-if raw[i:i+2] != b"Q2":
-    sys.exit("unexpected apk-tools-static header")
-L = int.from_bytes(raw[i+2:i+6], "big")
-rest = raw[i+6+L:]
-chunks = []
-while rest[:2] == b"\x1f\x8b":          # gzip magic, member by member
+i = 0
+if raw[:2] == b"Q1":                       # v2: skip signature header
+    i = raw.index(b"\n") + 1
+    if raw[i:i+2] != b"Q2":
+        sys.exit("unexpected apk-tools-static header")
+    L = int.from_bytes(raw[i+2:i+6], "big")
+    i += 6 + L
+rest, chunks = raw[i:], []
+while rest[:2] == b"\x1f\x8b":             # gzip magic, member by member
     dobj = zlib.decompressobj(31)
     try:
         chunks.append(dobj.decompress(rest))
@@ -373,9 +373,7 @@ while rest[:2] == b"\x1f\x8b":          # gzip magic, member by member
     rest = dobj.unused_data.lstrip(b"\x00")
 if not chunks:
     sys.exit("no gzip members in apk-tools-static")
-# control and data are SEPARATE tar members; scan each (tarfile stops at the
-# first end-of-archive marker, so one combined open would miss sbin/).
-for data in chunks:
+for data in chunks:                        # control & data are separate tars
     with tarfile.open(fileobj=io.BytesIO(data)) as tf:
         for m in tf.getmembers():
             if m.name == "sbin/apk.static":
@@ -383,10 +381,18 @@ for data in chunks:
                 print(f"[rootfs] apk.static extracted ({m.size} bytes)")
                 sys.exit(0)
 sys.exit("apk.static not found in package")
-PY
-      chmod 755 "$ROOTFS/usr/local/libexec/apk.static" 2>/dev/null || true
-    else echo "WARN: no apk-tools-static found on mirror index"; fi
-  else echo "WARN: alpine CDN unreachable (apk support degraded)"; fi
+PYEOF
+      then
+        chmod 755 "$ROOTFS/usr/local/libexec/apk.static" 2>/dev/null || true
+      else
+        echo "WARN: apk-tools-static parse failed (Alpine format change?) - Alpine .apk support degraded, continuing"
+      fi
+    else
+      echo "WARN: could not download apk-tools-static - continuing"
+    fi
+  else
+    echo "WARN: alpine CDN unreachable (apk support degraded) - continuing"
+  fi
   rm -f "$IDX" /tmp/apks.apk
 fi
 
