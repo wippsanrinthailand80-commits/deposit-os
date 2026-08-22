@@ -60,15 +60,19 @@ DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
 # xorg + video/input driver metas are required for the GUI to actually start
 # (they are not pulled in by --no-install-recommends elsewhere).
 # whiskermenu = the "Start" button for Windows-style mode (deposit-winmode).
-DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm xfce4-goodies xorg xserver-xorg-video-all xserver-xorg-input-all xfce4-whiskermenu-plugin}"
+DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm xfce4-goodies xorg xserver-xorg-video-all xserver-xorg-input-all xfce4-whiskermenu-plugin \
+  breeze-gtk-theme breeze-cursor-theme}"
 
-# --- Windows-friendly layer (Beta 0.1.0.8) ----------------------------------
+# --- Windows-friendly layer (Beta 0.1.0.8+) ---------------------------------
 # Wine lets users run Windows installers (.exe/.msi) directly; ntfs-3g gives
 # reliable read/write on Windows drives (kernel ntfs3 module also present);
 # fonts-wine ships the core Windows-metric fonts many installers expect.
+# bubblewrap/firejail sandbox the execution (SANDBOX=auto in win.conf);
+# carlito is metric-compatible with Calibri (Segoe-like UI text in winmode).
 # Runs entirely as the user (never root). Set 0 for a lean build.
 DEPOSIT_WIN_SUPPORT="${DEPOSIT_WIN_SUPPORT:-1}"
-DEPOSIT_WIN_PKGS="${DEPOSIT_WIN_PKGS:-wine wine64 winetricks fonts-wine ntfs-3g}"
+DEPOSIT_WIN_PKGS="${DEPOSIT_WIN_PKGS:-wine wine64 winetricks fonts-wine ntfs-3g \
+  bubblewrap firejail fonts-crosextra-carlito}"
 
 # --- Rounded aesthetic (kept light: theme + icon set, no heavy DE extras) ---
 DEPOSIT_THEME_PKGS="${DEPOSIT_THEME_PKGS:-materia-gtk-theme papirus-icon-theme \

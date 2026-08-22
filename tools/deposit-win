@@ -2,28 +2,38 @@
 # deposit-win — run a Windows installer (.exe / .msi) via Wine, as the user.
 #
 # Usage:
-#   deposit-win [--quiet] INSTALLER.exe
-#   deposit-win [--quiet] INSTALLER.msi
+#   deposit-win [--quiet] [--sandbox=AUTO|FIREJAIL|BWRAP|NONE] INSTALLER.exe
+#   deposit-win [--quiet] [--no-sandbox] INSTALLER.msi
 #
 # Safety model:
 #   - NEVER runs as root (Wine prefixes must stay user-owned)
-#   - prints SHA256 + size before launch (transparency, not a gate)
+#   - SHA256 ALLOWLIST: HASH_POLICY=block (default) refuses any installer whose
+#     sha256 is not whitelisted. No CLI bypass — verify the hash, then append
+#     it to ~/.config/deposit/win-hash-whitelist (or the system file).
+#     HASH_POLICY=warn downgrades this to a loud warning.
+#   - SANDBOX: firejail (privilege drop, seccomp, private /tmp) or bubblewrap
+#     (explicit binds only). SANDBOX=auto in /etc/deposit/win.conf picks the
+#     first available; --no-sandbox opts out for this run only.
 #   - asks for confirmation unless --quiet (GUI dialog when available)
 #   - argv-only execution; no shell interpolation of the path
 set -u
 
 QUIET=0
 ARGS=()
+SB_FLAG=""          # --sandbox= value, wins over conf when set
+NO_SANDBOX=0        # --no-sandbox, wins over everything
 for a in "$@"; do
   case "$a" in
     --quiet|-q) QUIET=1 ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    --no-sandbox) NO_SANDBOX=1 ;;
+    --sandbox=*) SB_FLAG="${a#*=}" ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) ARGS+=("$a") ;;
   esac
 done
 
 if [[ ${#ARGS[@]} -lt 1 ]]; then
-  echo "usage: deposit-win [--quiet] INSTALLER.{exe,msi}" >&2
+  echo "usage: deposit-win [--quiet] [--sandbox=AUTO|FIREJAIL|BWRAP|NONE|--no-sandbox] INSTALLER.{exe,msi}" >&2
   exit 2
 fi
 
@@ -38,6 +48,17 @@ if ! command -v wine >/dev/null 2>&1; then
   exit 3
 fi
 
+# --- configuration -----------------------------------------------------------
+SANDBOX="auto"
+HASH_POLICY="block"
+for cf in "/etc/deposit/win.conf" "$HOME/.config/deposit/win.conf"; do
+  [[ -f "$cf" ]] || continue
+  # shellcheck disable=SC1090
+  . "$cf"
+done
+[[ -n "$SB_FLAG" ]] && SANDBOX="${SB_FLAG^^}"
+(( NO_SANDBOX )) && SANDBOX="NONE"
+
 TARGET="${ARGS[0]}"
 if [[ ! -f "$TARGET" ]]; then
   echo "deposit-win: file not found: $TARGET" >&2
@@ -46,35 +67,112 @@ fi
 ABS="$(readlink -f -- "$TARGET")"
 BASE="$(basename -- "$ABS")"
 
-case "$(strtolower() { tr 'A-Z' 'a-z' <<<"$1"; }; strtolower "$BASE")" in
+case "${BASE,,}" in
   *.msi) MODE="msi" ;;
   *.exe) MODE="exe" ;;
   *) echo "deposit-win: unsupported installer type: $BASE (want .exe or .msi)" >&2; exit 5 ;;
 esac
 
+# --- sha256 allowlist ---------------------------------------------------------
+HASH="$(sha256sum -- "$ABS" | cut -d' ' -f1)"
+hash_allowed() {
+  local h="$1" f
+  for f in "/etc/deposit/win-hash-whitelist" "$HOME/.config/deposit/win-hash-whitelist"; do
+    [[ -f "$f" ]] || continue
+    # match on field 1 so optional labels after the hash are fine; '#' = comment
+    if awk -v h="$(tr 'A-Z' 'a-z' <<<"$h")" '
+      /^[[:space:]]*(#|$)/ { next }
+      tolower($1) == h { found=1; exit }
+      END { exit (found ? 0 : 1) }' "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 echo "── Deposit OS · Windows installer ──────────────────────────"
 echo "  file : $BASE"
 echo "  size : $(du -h -- "$ABS" | cut -f1)"
-echo "  sha256: $(sha256sum -- "$ABS" | cut -d' ' -f1)"
+echo "  sha256: $HASH"
 echo "  engine: wine ($(wine --version 2>/dev/null | head -1))"
 echo "  prefix: ${WINEPREFIX:-$HOME/.wine} (user-owned)"
 echo "────────────────────────────────────────────────────────────"
 
-if (( ! QUIET )); then
-  ANS=""
-  if command -v zenity >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
-    zenity --question --title="Deposit OS" \
-      --text="Run this Windows installer?\n\n$BASE" >/dev/null 2>&1 || { echo "cancelled."; exit 6; }
-  else
-    read -r -p "Run this Windows installer? [y/N] " ANS
-    [[ "${ANS,,}" == "y" || "${ANS,,}" == "yes" ]] || { echo "cancelled."; exit 6; }
+if ! hash_allowed "$HASH"; then
+  if [[ "${HASH_POLICY,,}" == "block" ]]; then
+    cat >&2 <<MSG
+deposit-win: REFUSED — sha256 not in the whitelist (HASH_POLICY=block).
+
+  $HASH
+
+If YOU verified this installer is trustworthy, allow it once:
+
+  echo $HASH >> ~/.config/deposit/win-hash-whitelist
+
+There is intentionally no command-line flag to bypass this check.
+MSG
+    exit 8
   fi
+  echo "WARNING: sha256 is NOT whitelisted (HASH_POLICY=warn — continuing)." >&2
+else
+  echo "[deposit-win] sha256 whitelisted ✓"
 fi
+
+# --- sandbox ------------------------------------------------------------------
+pick_sandbox() {
+  if command -v firejail >/dev/null 2>&1; then echo firejail
+  elif command -v bwrap >/dev/null 2>&1; then echo bwrap
+  else echo none; fi
+}
+case "${SANDBOX^^}" in
+  AUTO)    SANDBOX="$(pick_sandbox)" ;;
+  FIREJAIL) command -v firejail >/dev/null 2>&1 || { echo "deposit-win: firejail not installed" >&2; exit 9; } ;;
+  BWRAP)    command -v bwrap >/dev/null 2>&1    || { echo "deposit-win: bubblewrap not installed" >&2; exit 9; } ;;
+  NONE) : ;;
+  *) echo "deposit-win: unknown sandbox '$SANDBOX' (want auto|firejail|bwrap|none)" >&2; exit 9 ;;
+esac
+
+CMD=(wine)
+if [[ "$MODE" == "msi" ]]; then
+  CMD+=(msiexec /i "$BASE")
+else
+  CMD+=("$BASE")
+fi
+
+case "${SANDBOX,,}" in
+  firejail)
+    echo "[deposit-win] sandbox: firejail (caps dropped, seccomp, private /tmp)"
+    exec firejail --quiet --noprofile --caps.drop=all --nonewprivs --seccomp \
+      --private-tmp -- "${CMD[@]}"
+    ;;
+  bwrap)
+    echo "[deposit-win] sandbox: bubblewrap (explicit binds)"
+    WINEPFX="${WINEPREFIX:-$HOME/.wine}"
+    mkdir -p "$WINEPFX"
+    BWRAP_ARGS=(
+      --die-with-parent --new-session
+      --ro-bind /usr /usr --ro-bind /etc /etc
+      --symlink usr/lib /lib --symlink usr/lib64 /lib64
+      --symlink usr/bin /bin --symlink usr/sbin /sbin
+      --proc /proc --dev /dev
+      --tmpfs /tmp --tmpfs /run --tmpfs /var/tmp
+      --dev-bind-try /dev/dri /dev/dri
+      --dev-bind-try /dev/snd /dev/snd
+      --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
+      --ro-bind-try "$HOME/.Xauthority" "$HOME/.Xauthority"
+      --bind-try "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse" \
+                 "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse"
+      --ro-bind-try "$HOME/.cache/fontconfig" "$HOME/.cache/fontconfig"
+      --bind "$WINEPFX" "$WINEPFX"
+      --bind "$(dirname -- "$ABS")" "$(dirname -- "$ABS")"
+    )
+    exec bwrap "${BWRAP_ARGS[@]}" "${CMD[@]}"
+    ;;
+  *)
+    echo "[deposit-win] sandbox: NONE (set SANDBOX=auto in /etc/deposit/win.conf)"
+    ;;
+esac
 
 cd "$(dirname -- "$ABS")" || exit 7
 echo "[deposit-win] launching $BASE …"
-if [[ "$MODE" == "msi" ]]; then
-  exec wine msiexec /i "$(basename -- "$ABS")"
-else
-  exec wine "$(basename -- "$ABS")"
-fi
+exec "${CMD[@]}"

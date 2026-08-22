@@ -161,6 +161,7 @@ mirrors; only explicit compat libs are pulled (`libicu70`, `libssl1.1`,
 ```bash
 deposit-win setup.exe       # run a Windows installer (Wine, as YOUR user)
 deposit-win --quiet app.msi # skip the confirmation dialog
+deposit-win --no-sandbox g.exe    # this run without the sandbox
 deposit-winmode on          # Windows-style taskbar + Start button
 deposit-winmode off         # back to the Deposit glass panel
 deposit-winmode toggle      # or tap "Windows Mode" in Settings
@@ -169,8 +170,19 @@ deposit-winmode toggle      # or tap "Windows Mode" in Settings
 - Double-clicking an `.exe`/`.msi` in the file manager routes through
   `deposit-win`: it prints the file's SHA256 + size, asks once, and never
   runs as root.
+- **SHA256 allowlist** (`HASH_POLICY=block` by default): installers whose
+  hash is not whitelisted are refused — there is no CLI bypass. Verified a
+  file? Append its hash to `~/.config/deposit/win-hash-whitelist`
+  (system-wide: `/etc/deposit/win-hash-whitelist`). `HASH_POLICY=warn` in
+  `/etc/deposit/win.conf` downgrades refusals to loud warnings.
+- **Sandboxed execution**: `SANDBOX=auto` picks firejail (caps dropped,
+  seccomp, private `/tmp`) or bubblewrap (explicit binds only: X11, GPU,
+  audio, your Wine prefix). Override with `SANDBOX=` or per-run flags.
 - `wine`, `winetricks` and the core Windows-metric fonts are preinstalled;
   the Wine prefix lives in `~/.wine` (user-owned).
+- Windows mode goes further than the taskbar: GTK widgets switch to
+  **Breeze-dark** with Breeze cursors and Carlito (Calibri-metric) fonts,
+  so dialogs feel native too.
 - NTFS (kernel `ntfs3` + `ntfs-3g`) and exFAT drives mount read-write.
 - Lean build? `DEPOSIT_WIN_SUPPORT=0` drops the whole layer.
 

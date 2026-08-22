@@ -547,8 +547,7 @@ GREETER
 # Two full xfce4-panel layouts shipped read-only; deposit-winmode copies the
 # chosen one into the user's xfconf and restarts the panel. No root needed
 # at runtime.
-mkdir -p "$ROOTFS/usr/share/deposit/winmode"
-cat > "$ROOTFS/usr/share/deposit/winmode/deposit-panel.xml" <<'EOF'
+mkdir -p "$ROOTFS/usr/share/deposit/winmode"cat > "$ROOTFS/usr/share/deposit/winmode/deposit-panel.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
   <property name="panels" type="array">
@@ -613,6 +612,63 @@ cat > "$ROOTFS/usr/share/deposit/winmode/windows-panel.xml" <<'EOF'
     </property>
   </property>
 </channel>
+EOF
+
+# Windows-mode GTK look: Breeze-dark widgets + Breeze cursors (closest
+# packaged stack to Windows' flat UI); Deposit mode restores Materia-dark.
+cat > "$ROOTFS/usr/share/deposit/winmode/windows-xsettings.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Breeze-dark"/>
+    <property name="IconThemeName" type="string" value="Papirus-Dark"/>
+    <property name="DoubleClickTime" type="int" value="400"/>
+    <property name="CursorThemeName" type="string" value="breeze_cursors"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="FontName" type="string" value="Carlito 10"/>
+    <property name="MonospaceFontName" type="string" value="Noto Sans Mono 10"/>
+    <property name="DecorationLayout" type="string" value=":minimize,maximize,close"/>
+    <property name="DialogsUseHeader" type="bool" value="true"/>
+  </property>
+</channel>
+EOF
+cat > "$ROOTFS/usr/share/deposit/winmode/deposit-xsettings.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Materia-dark"/>
+    <property name="IconThemeName" type="string" value="Papirus-Dark"/>
+    <property name="DoubleClickTime" type="int" value="400"/>
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="FontName" type="string" value="Noto Sans 11"/>
+    <property name="MonospaceFontName" type="string" value="Noto Sans Mono 11"/>
+    <property name="DecorationLayout" type="string" value="menu:minimize,maximize,close"/>
+    <property name="DialogsUseHeader" type="bool" value="true"/>
+  </property>
+</channel>
+EOF
+
+# Wine execution policy for deposit-win (sandbox + sha256 allowlist).
+mkdir -p "$ROOTFS/etc/deposit"
+cat > "$ROOTFS/etc/deposit/win.conf" <<EOF
+# deposit-win policy — user override: ~/.config/deposit/win.conf
+# SANDBOX: auto | firejail | bwrap | none   (auto = firejail, else bwrap)
+SANDBOX="auto"
+# HASH_POLICY: block | warn
+# block = refuse installers whose sha256 is not whitelisted (no CLI bypass).
+# warn  = loud warning only.
+HASH_POLICY="block"
+EOF
+cat > "$ROOTFS/etc/deposit/win-hash-whitelist" <<'EOF'
+# /etc/deposit/win-hash-whitelist — one sha256 per line.
+# Lines starting with '#' are comments; an optional label may follow the hash.
+# Users can whitelist their own installers in:
+#   ~/.config/deposit/win-hash-whitelist
+# Example:
+# 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  ubuntu-installer-test.exe
 EOF
 
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------

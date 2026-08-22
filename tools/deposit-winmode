@@ -14,9 +14,20 @@ set -u
 
 TPL="/usr/share/deposit/winmode"
 CONF_DIR="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
-PANEL_DST="$CONF_DIR/xfce4-panel.xml"
-WMENU_RC="$HOME/.config/xfce4/panel/whiskermenu-1.rc"
 MARKER="$HOME/.config/deposit/winmode-mode"
+
+# mode -> "source-basename:dest-basename" pairs applied on switch
+files_for_mode() {
+  if [[ "$1" == "windows" ]]; then
+    printf '%s\n' \
+      "windows-panel.xml:xfce4-panel.xml" \
+      "windows-xsettings.xml:xsettings.xml"
+  else
+    printf '%s\n' \
+      "deposit-panel.xml:xfce4-panel.xml" \
+      "deposit-xsettings.xml:xsettings.xml"
+  fi
+}
 
 current_mode() {
   if [[ -f "$MARKER" && "$(cat "$MARKER" 2>/dev/null)" == "windows" ]]; then
@@ -38,33 +49,40 @@ restart_panel() {
 }
 
 apply() {
-  local src="$1" mode_name="$2"
-  [[ -f "$TPL/$src" ]] || { echo "[winmode] missing template $TPL/$src" >&2; exit 3; }
+  local mode_name="$1" pair src dst
   if [[ "$(id -u)" == "0" ]]; then
     echo "[winmode] refusing to run as root (this changes YOUR desktop only)." >&2
     exit 1
   fi
   mkdir -p "$CONF_DIR" "$HOME/.config/deposit" "$HOME/.config/xfce4/panel"
-  # one-time safety backup of whatever the user had
-  if [[ -f "$PANEL_DST" && ! -f "$PANEL_DST.pre-winmode" ]]; then
-    cp -- "$PANEL_DST" "$PANEL_DST.pre-winmode"
-  fi
-  cp -- "$TPL/$src" "$PANEL_DST"
+  while IFS=: read -r pair; do
+    [[ -n "$pair" ]] || continue
+    src="${pair%%:*}"; dst="${pair##*:}"
+    [[ -f "$TPL/$src" ]] || { echo "[winmode] missing template $TPL/$src" >&2; exit 3; }
+    local target="$CONF_DIR/$dst"
+    # one-time safety backup of whatever the user had
+    if [[ -f "$target" && ! -f "$target.pre-winmode" ]]; then
+      cp -- "$target" "$target.pre-winmode"
+    fi
+    cp -- "$TPL/$src" "$target"
+  done <<EOF
+$(files_for_mode "$mode_name")
+EOF
   echo "$mode_name" > "$MARKER"
   if [[ "$mode_name" == "windows" ]]; then
     # Whisker menu: label the button "Start", keep config file tiny/harmless.
-    printf 'button-title=Start\nshow-button-title=true\n' > "$WMENU_RC"
+    printf 'button-title=Start\nshow-button-title=true\n' > "$HOME/.config/xfce4/panel/whiskermenu-1.rc"
   fi
-  echo "[winmode] $mode_name layout applied ($PANEL_DST)"
+  echo "[winmode] $mode_name layout + theme applied (panel, GTK/cursor)"
   restart_panel
 }
 
 case "${1:-status}" in
-  on)     apply windows-panel.xml windows ;;
-  off)    apply deposit-panel.xml deposit ;;
+  on)     apply windows ;;
+  off)    apply deposit ;;
   toggle)
-    if [[ "$(current_mode)" == "windows" ]]; then apply deposit-panel.xml deposit
-    else apply windows-panel.xml windows; fi ;;
+    if [[ "$(current_mode)" == "windows" ]]; then apply deposit
+    else apply windows; fi ;;
   status) echo "windows-mode: $(current_mode)" ;;
   -h|--help|"") sed -n '2,13p' "$0"; exit 0 ;;
   *) echo "usage: deposit-winmode [on|off|toggle|status]" >&2; exit 2 ;;
