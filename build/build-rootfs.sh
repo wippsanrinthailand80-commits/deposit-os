@@ -315,8 +315,10 @@ if [ "$DEPOSIT_ANDROID_SUPPORT" = "1" ]; then
     && echo "deb [signed-by=/usr/share/keyrings/waydroid.gpg] https://repo.waydro.id/ $DEPOSIT_SUITE main" \
        > /etc/apt/sources.list.d/waydroid.list \
     || echo "WARN: could not add waydroid repo"
-  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_ANDROID_PKGS \
-    || echo "WARN: android install issue (waydroid/adb)"
+  apt-get \$APT_OPTS install -y --no-install-recommends adb \
+    || echo "WARN: adb install issue"
+  apt-get \$APT_OPTS install -y --no-install-recommends waydroid \
+    || echo "WARN: waydroid unavailable (repo unreachable?) - Android apps degrade to adb-only"
 fi
 # Bluetooth A2DP audio (AirPods/headsets) — non-fatal.
 apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_BT_PKGS \

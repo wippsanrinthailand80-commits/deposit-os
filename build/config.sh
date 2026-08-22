@@ -64,7 +64,7 @@ DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
 # xorg + video/input driver metas are required for the GUI to actually start
 # (they are not pulled in by --no-install-recommends elsewhere).
 # whiskermenu = the "Start" button for Windows-style mode (deposit-winmode).
-DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm xfce4-goodies xorg xserver-xorg-video-all xserver-xorg-input-all xfce4-whiskermenu-plugin \
+DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm lightdm-gtk-greeter xfce4-goodies xorg xserver-xorg-video-all xserver-xorg-input-all xfce4-whiskermenu-plugin \
   breeze-gtk-theme breeze-cursor-theme}"
 
 # --- Windows-friendly layer (Beta 0.1.0.8+) ---------------------------------
@@ -111,7 +111,7 @@ DEPOSIT_APPS="${DEPOSIT_APPS:-network-manager-gnome pavucontrol pulseaudio \
   ibus ibus-libthai im-config \
   bluez bluez-tools \
   plymouth plymouth-themes \
-  firefox-esr}"
+  network-manager epiphany-browser}"
 # Services: firewall present but not auto-enabled (so SSH isn't locked out).
 DEPOSIT_SERVICES="${DEPOSIT_SERVICES:-ufw}"
 
