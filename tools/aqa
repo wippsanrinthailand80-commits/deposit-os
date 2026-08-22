@@ -2,36 +2,44 @@
 # ============================================================================
 # aqa — Deposit OS installer / package fetcher
 # ----------------------------------------------------------------------------
-#   aqa install <url>        scan a URL for .deb / .mlpds files and install them
-#                              e.g.  aqa install http://example.com/builds/
+#   aqa install <url>        scan a URL for ALL supported package types and
+#                            ask which one(s) to install:
+#                              .deb   (apt)      checksum REQUIRED
+#                              .mlpds (native)   GPG-verified
+#                              .apk   (Android)  via Waydroid/adb
+#                              .apk   (Alpine)   apk-tools, signature-checked
+#                              .exe/.msi (Wine)  routed through deposit-win
+#                            e.g.  aqa install http://example.com/builds/
 #   aqa install <app|turbo>   install a known app (chrome, stream) or the
 #                             optional turbo GUI applet (aqa install turbo)
 #   aqa list                  show installable apps
 #   aqa help                  this message
 #
 # "aqa install http://example.com" is meant to be typed in a real terminal on a
-# physically-installed Deposit OS. It downloads, finds compatible .deb/.mlpds
-# files, and installs them immediately.
+# physically-installed Deposit OS. It downloads the page, finds compatible
+# packages, shows a numbered menu, and installs only what YOU pick.
 #
 # Options:
 #   --dry-run      show what would happen, download/install nothing
+#   --yes          non-interactive: install EVERYTHING found (scripted use;
+#                  per-type verification rules below still apply)
 #   --no-verify    ONLY for curated apps (chrome/stream/turbo): install without
 #                  a registered checksum. It does NOT bypass the mandatory
 #                  checksum requirement for arbitrary web .deb files.
-#   --type deb|mlpds   restrict the scan to one file type
+#   --type deb|mlpds|apk|exe|msi   restrict the scan to one file type
 #
-# Security:
-#   * Curated apps (chrome/stream/turbo): installed only if their registered
-#     sha256 matches, or you pass --no-verify (trusted source).
-#   * Arbitrary web sources (a scanned URL OR a direct .deb/.mlpds link):
-#     .mlpds are verified by the package's GPG signature; .deb files REQUIRE a
-#     sha256 checksum (append #sha256=<hash> to the URL, or pass it as the 2nd
-#     arg). --no-verify is IGNORED for arbitrary web .deb — a checksum is
-#     mandatory, because installing unverified code as root is the riskiest path.
+# Security (per type, arbitrary web sources):
+#   * .deb        checksum MANDATORY (#sha256= fragment or 2nd argument);
+#                 --no-verify does NOT bypass it.
+#   * .mlpds      verified by its embedded GPG signature at install time.
+#   * .apk        downloaded, sha256 shown; Alpine ones are signature-verified
+#                 by apk-tools, Android ones install into the Waydroid sandbox.
+#   * .exe/.msi   downloaded, then executed under deposit-win's own policy —
+#                 pass #sha256=<hash> to pre-approve (--expect) or whitelist.
 # ============================================================================
 set -uo pipefail
 
-VERSION="0.1"
+VERSION="0.2"
 REPO_RAW="https://raw.githubusercontent.com/wippsanrinthailand80-commits/deposit-os/main"
 APPS_CONF="/etc/deposit/aqa.apps"
 
@@ -50,6 +58,7 @@ SUDO=""; [[ "$(id -u)" -eq 0 ]] || SUDO="sudo"
 DRYRUN=0
 RESTRICT=""
 NOVERIFY=0
+YESALL=0
 
 log(){ echo "aqa: $*"; }
 die(){ echo "aqa: $*" >&2; exit 1; }
@@ -102,6 +111,34 @@ install_mlpds(){
   $SUDO mlpds install "$f" --target /
 }
 
+# .apk — Android (Waydroid/adb) or Alpine (apk-tools); deposit-apk sniffs.
+install_apk_file(){
+  local f="$1"
+  if (( DRYRUN )); then log "[dry-run] would install apk via deposit-apk: $f"; return 0; fi
+  command -v deposit-apk >/dev/null 2>&1 || die "deposit-apk not found in PATH"
+  deposit-apk "$f"
+}
+
+# .exe/.msi — Wine via deposit-win (its own whitelist/policy still applies).
+install_win_file(){
+  local url="$1" f="$2" expect="${3:-}" got frag
+  frag="${url##*#}"; [[ "$frag" == "$url" ]] && frag=""
+  [[ -z "$expect" && "$frag" == sha256=* ]] && expect="${frag#sha256=}"
+  got="$(sha256sum "$f" | cut -d' ' -f1)"
+  if (( DRYRUN )); then log "[dry-run] would run deposit-win on: $f (sha256 $got)"; return 0; fi
+  command -v deposit-win >/dev/null 2>&1 || die "deposit-win not found in PATH"
+  if [[ -n "$expect" ]]; then
+    if [[ "${expect,,}" != "$got" ]]; then
+      log "refusing $url: checksum mismatch (expected $expect, got $got)"; return 1
+    fi
+    log "checksum verified for $url"
+    deposit-win --quiet "--expect=$got" "$f"
+    return $?
+  fi
+  log "handing to deposit-win (sha256 $got) — its whitelist policy governs execution"
+  deposit-win --quiet "$f"
+}
+
 # --- verify + install a .deb (shared by curated apps and web sources) --------
 # $1=url $2=local file $3=curated(0/1) $4=expected sha256 (optional)
 # Curated (known apps / turbo): --no-verify is honoured when no checksum is
@@ -135,45 +172,102 @@ try_install_deb(){
   return 1
 }
 
-# --- scan a URL for .deb/.mlpds and install --------------------------------
-# If the URL is itself a direct .deb/.mlpds file, download it directly.
-# Otherwise treat it as an HTML index and scan for links. $2 (optional) is the
-# expected sha256 (a #sha256=<hash> URL fragment also works).
+# --- dispatch one downloaded file by extension ------------------------------
+install_scanned(){
+  # NOTE: don't merge these locals — ${f##*.} must run AFTER f is assigned
+  # (all words of a single `local` expand before any of them are set).
+  local url="$1" f="$2" expect="${3:-}"
+  local ext="${f##*.}"
+  case "${ext,,}" in
+    deb)   try_install_deb "$url" "$f" 0 "$expect" ;;
+    mlpds) install_mlpds "$f" ;;
+    apk)   install_apk_file "$f" ;;
+    exe|msi) install_win_file "$url" "$f" "$expect" ;;
+    *) log "skipping unsupported type: .$ext" ;;
+  esac
+}
+
+type_of(){ case "${1##*.}" in deb|mlpds|apk|exe|msi) echo "${1##*.}";; *) echo "?";; esac; }
+
+# --- scan a URL for ALL supported package types ------------------------------
+# If the URL is itself a supported file, download it directly. Otherwise treat
+# it as an HTML index, list every .deb/.mlpds/.apk/.exe/.msi link, and ask the
+# user which to install (numbered picker; --yes installs everything found).
 scan_url(){
   local url="$1" expect="${2:-}" html links tmp f path tail
   path="${url%%[?#]*}"; tail="$(basename "$path")"
-  case "$tail" in
-    *.deb|*.mlpds)
+  case "${tail,,}" in
+    *.deb|*.mlpds|*.apk|*.exe|*.msi)
       log "direct file link detected: $url"
       tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
       f="$tmp/$tail"
       download "$url" "$f" || die "download failed: $url"
-      case "$f" in
-        *.deb)   try_install_deb "$url" "$f" 0 "$expect" ;;
-        *.mlpds) install_mlpds "$f" ;;
-      esac
+      install_scanned "$url" "$f" "$expect"
       return 0
       ;;
   esac
-  log "scanning $url"
+  log "scanning $url for .deb/.mlpds/.apk/.exe/.msi …"
   html="$(fetch "$url")" || die "could not fetch $url"
-  links="$(echo "$html" | grep -oE 'href="[^"]+\.(deb|mlpds)"' | sed -E 's/href="([^"]+)"/\1/' | sort -u)"
-  [[ -z "$links" ]] && { log "no .deb/.mlpds links found at $url"; return 0; }
-  tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
+  links="$(echo "$html" \
+     | grep -oE 'href="[^"]+\.(deb|mlpds|apk|exe|msi)"|href='"'"'[^'"'"']+\.(deb|mlpds|apk|exe|msi)'"'"'' \
+     | sed -E "s/href=[\"']([^\"']+)[\"']/\1/" | sort -u)"
+  [[ -z "$links" ]] && { log "no supported package links found at $url"; return 0; }
+
+  # build the candidate table (honour --type)
+  local -a CAND_URL=() CAND_NAME=()
+  local rel n=0
   for rel in $links; do
-    case "$rel" in
-      http*|/*) f="$rel" ;;
-      *) f="$(dirname "$url")/$rel" ;;
+    case "$rel" in http*|/*) f="$rel" ;; *) f="$(dirname "$url")/$rel" ;; esac
+    [[ -n "$RESTRICT" && "${f##*.}" != "$RESTRICT" ]] && continue
+    n=$((n+1)); CAND_URL+=("$f"); CAND_NAME+=("$(basename "$f")")
+  done
+  (( n )) || { log "no supported package links found at $url (--type filter?)"; return 0; }
+
+  echo ""
+  echo "Found $n supported package(s):"
+  local i
+  for (( i=0; i<n; i++ )); do
+    printf '  %d) %-45s [%s]\n' $((i+1)) "${CAND_NAME[$i]}" "$(type_of "${CAND_NAME[$i]}")"
+  done
+  echo ""
+
+  if (( DRYRUN )); then log "[dry-run] nothing downloaded or installed."; return 0; fi
+
+  # pick
+  local ans sel picks=""
+  if (( YESALL )); then
+    picks="all"
+  elif [[ -t 0 ]]; then
+    read -r -p "Install which? [1-$n, a=all, q=quit] " ans
+    case "${ans,,}" in
+      ""|q|quit) log "cancelled."; return 0 ;;
+      a|all) picks="all" ;;
+      *) picks="$ans" ;;
     esac
-    [[ -n "$RESTRICT" && "$f" != *.$RESTRICT ]] && continue
-    log "found: $f"
-    if (( DRYRUN )); then log "[dry-run] would fetch+install $f"; continue; fi
-    out="$tmp/$(basename "$f")"
-    download "$f" "$out" || { log "download failed: $f"; continue; }
-    case "$out" in
-      *.deb)   try_install_deb "$f" "$out" 0 "$expect" ;;
-      *.mlpds) install_mlpds "$out" ;;
-    esac
+  else
+    die "non-interactive shell — re-run with --yes to install everything found,"
+        "or run from a terminal to choose."
+  fi
+
+  tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
+  local choice
+  if [[ "$picks" == "all" ]]; then
+    for (( i=0; i<n; i++ )); do
+      log "installing ${CAND_NAME[$i]} …"
+      out="$tmp/${CAND_NAME[$i]}"
+      download "${CAND_URL[$i]}" "$out" || { log "download failed: ${CAND_URL[$i]}"; continue; }
+      install_scanned "${CAND_URL[$i]}" "$out" "$expect" || log "could not install ${CAND_NAME[$i]}"
+    done
+    return 0
+  fi
+  for choice in $picks; do
+    [[ "$choice" =~ ^[0-9]+$ ]] || { log "ignoring bad selection: $choice"; continue; }
+    (( choice >= 1 && choice <= n )) || { log "selection out of range: $choice"; continue; }
+    i=$((choice-1))
+    log "installing ${CAND_NAME[$i]} …"
+    out="$tmp/${CAND_NAME[$i]}"
+    download "${CAND_URL[$i]}" "$out" || { log "download failed: ${CAND_URL[$i]}"; continue; }
+    install_scanned "${CAND_URL[$i]}" "$out" "$expect" || log "could not install ${CAND_NAME[$i]}"
   done
 }
 
@@ -235,13 +329,14 @@ install_turbo(){
 }
 
 usage(){
-  sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # --- arg parsing -----------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRYRUN=1; shift ;;
+    --yes|-y) YESALL=1; shift ;;
     --no-verify) NOVERIFY=1; shift ;;
     --type)    RESTRICT="${2#.}"; shift 2 ;;
     -h|--help|help) usage; exit 0 ;;

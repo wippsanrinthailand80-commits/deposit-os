@@ -22,12 +22,14 @@ QUIET=0
 ARGS=()
 SB_FLAG=""          # --sandbox= value, wins over conf when set
 NO_SANDBOX=0        # --no-sandbox, wins over everything
+EXPECT=""           # --expect=SHA256 : caller-supplied approval hash
 for a in "$@"; do
   case "$a" in
     --quiet|-q) QUIET=1 ;;
     --no-sandbox) NO_SANDBOX=1 ;;
     --sandbox=*) SB_FLAG="${a#*=}" ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    --expect=*) EXPECT="${a#*=}" ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     *) ARGS+=("$a") ;;
   esac
 done
@@ -99,7 +101,19 @@ echo "  prefix: ${WINEPREFIX:-$HOME/.wine} (user-owned)"
 echo "────────────────────────────────────────────────────────────"
 
 if ! hash_allowed "$HASH"; then
-  if [[ "${HASH_POLICY,,}" == "block" ]]; then
+  if [[ -n "$EXPECT" ]]; then
+    if [[ "${EXPECT,,}" == "$HASH" ]]; then
+      echo "[deposit-win] sha256 matches caller-supplied --expect ✓"
+    else
+      cat >&2 <<MSG
+deposit-win: REFUSED — --expect hash mismatch.
+  expected: $EXPECT
+  actual  : $HASH
+A file whose hash differs from the approved one is never executed.
+MSG
+      exit 8
+    fi
+  elif [[ "${HASH_POLICY,,}" == "block" ]]; then
     cat >&2 <<MSG
 deposit-win: REFUSED — sha256 not in the whitelist (HASH_POLICY=block).
 
@@ -109,11 +123,13 @@ If YOU verified this installer is trustworthy, allow it once:
 
   echo $HASH >> ~/.config/deposit/win-hash-whitelist
 
-There is intentionally no command-line flag to bypass this check.
+There is intentionally no command-line flag to bypass this check
+(a caller that knows the hash may pass --expect=<hash> instead).
 MSG
     exit 8
+  else
+    echo "WARNING: sha256 is NOT whitelisted (HASH_POLICY=warn — continuing)." >&2
   fi
-  echo "WARNING: sha256 is NOT whitelisted (HASH_POLICY=warn — continuing)." >&2
 else
   echo "[deposit-win] sha256 whitelisted ✓"
 fi

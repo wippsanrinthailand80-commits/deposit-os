@@ -225,12 +225,22 @@ high-fidelity audio instead of the handset profile.
 ## Package management quick reference
 
 ```bash
-aqa install <URL>          # install from a .deb or .mlpds URL. A direct file URL
-                           # (e.g. http://x/pkg.deb) is downloaded as-is; a page
-                           # URL is scanned for .deb/.mlpds links. .mlpds are GPG
-                           # verified. Arbitrary web .deb REQUIRE a checksum:
-                           # append #sha256=<hash> to the URL (or pass it as the
-                           # 2nd argument). --no-verify does NOT bypass this.
+aqa install <URL>          # scan the URL for ALL supported types — .deb, .mlpds,
+                           # .apk (Android via Waydroid/adb), .apk (Alpine via
+                           # apk-tools) and .exe/.msi (Wine via deposit-win) —
+                           # show a numbered menu, install only what you pick.
+                           # Direct file links work too.
+aqa install <URL> --yes    # scripted mode: install everything found without the
+                           # prompt (per-type verification still enforced)
+
+Per-type verification for arbitrary web sources:
+  .deb      checksum REQUIRED (#sha256= fragment or 2nd argument;
+            --no-verify does NOT bypass it)
+  .mlpds    verified by the package's GPG signature
+  .apk      Alpine: signature-checked by apk-tools; Android: installs into
+            the Waydroid sandbox
+  .exe/.msi handed to deposit-win — pass #sha256=<hash> to pre-approve or
+            whitelist the hash (HASH_POLICY=block governs)
 aqa install chrome         # curated app: installs on its registered sha256, or
 aqa install steam          # with --no-verify when no checksum is registered
 aqa install turbo          # (trusted source only)
