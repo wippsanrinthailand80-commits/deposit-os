@@ -24,6 +24,28 @@ echo "[live] injecting CI autologin into disk image"
 MNT="$(mktemp -d)"
 sudo mount -o loop "$OUT" "$MNT"
 sudo bash ci/inject-autologin.sh "$MNT" deposit --skip-oobe
+
+# Resource-metrics probe: once the desktop settles, record REAL idle RAM +
+# storage usage inside the running OS. Persisted into the image at
+# /var/log/deposit-metrics.txt so the CI job can harvest it after shutdown
+# (job *logs* may be unreadable, but artifacts are not).
+echo "[live] installing resource-metrics probe"
+sudo tee "$MNT/etc/systemd/system/deposit-metrics.service" >/dev/null <<'UNIT'
+[Unit]
+Description=Deposit OS idle resource measurement
+After=graphical.target lightdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'sleep 75; { echo "=== Deposit OS idle metrics ==="; date -u; echo "-- free -m --"; free -m; echo "-- df -h / --"; df -h /; echo "-- du -sx MB --"; du -sxm /usr /var /etc 2>/dev/null; } > /var/log/deposit-metrics.txt 2>&1'
+
+[Install]
+WantedBy=graphical.target
+UNIT
+sudo mkdir -p "$MNT/etc/systemd/system/graphical.target.wants"
+sudo ln -sf /etc/systemd/system/deposit-metrics.service \
+            "$MNT/etc/systemd/system/graphical.target.wants/deposit-metrics.service"
+
 sudo umount "$MNT"; rmdir "$MNT"
 
 VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
@@ -59,4 +81,13 @@ for t in "${times[@]}"; do
 done
 
 pkill -f qemu-system-x86_64 || true
+
+# Harvest the metrics the probe wrote into the image (persistent ext4).
+echo "[live] harvesting resource metrics from image"
+if MNT2="$(mktemp -d)" && mount -o loop,ro "$OUT" "$MNT2" 2>/dev/null; then
+  cp "$MNT2/var/log/deposit-metrics.txt" /tmp/deposit-metrics.txt 2>/dev/null || true
+  umount "$MNT2"; rmdir "$MNT2"
+fi
+[ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
+  || echo "[live] no metrics file (probe did not run?)"
 echo "[live] done"

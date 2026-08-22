@@ -90,7 +90,7 @@ DEPOSIT_FOREIGN_SUPPORT="${DEPOSIT_FOREIGN_SUPPORT:-1}"
 
 # --- Rounded aesthetic (kept light: theme + icon set, no heavy DE extras) ---
 DEPOSIT_THEME_PKGS="${DEPOSIT_THEME_PKGS:-materia-gtk-theme papirus-icon-theme \
-  fonts-noto-color-emoji}"
+  fonts-noto-color-emoji librsvg2-common}"
 
 # --- Thai language support (fonts + locale). On by default. -----------------
 DEPOSIT_ENABLE_THAI="${DEPOSIT_ENABLE_THAI:-1}"

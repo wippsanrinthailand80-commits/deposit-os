@@ -640,11 +640,11 @@ if [[ -f "$REPO_ROOT/assets/logo.svg" ]]; then
 fi
 mkdir -p "$ROOTFS/etc/initramfs-tools/conf.d"
 echo "FRAMEBUFFER=y" > "$ROOTFS/etc/initramfs-tools/conf.d/splash"
-# LightDM greeter (nice UI: dark wallpaper on login, rounded greeter)
+# LightDM greeter (dark Andromeda-toned login, rounded greeter)
 mkdir -p "$ROOTFS/etc/lightdm"
 cat > "$ROOTFS/etc/lightdm/lightdm-gtk-greeter.conf" <<GREETER
 [greeter]
-background=/usr/share/backgrounds/deposit/wallpaper-andromeda.svg
+background=#0b1020
 theme-name=Materia-dark
 icon-theme-name=Papirus-Dark
 font-name=Noto Sans 11
@@ -654,6 +654,10 @@ position=50%,center 50%,center
 clock-format=%a, %d %b  %H:%M
 indicators=~host;~spacer;~clock;~spacer;~power
 GREETER
+# NOTE: background is a solid color on purpose. lightdm-gtk-greeter loads the
+# image via gdk-pixbuf; pointing it at an SVG crashed greeters on installs
+# where librsvg's loader wasn't pulled in ("Failed to start lightdm").
+# The XFCE desktop still uses the full Andromeda SVG wallpaper.
 
 # --- Windows-style mode templates (Beta 0.1.0.8, deposit-winmode) -----------
 # Two full xfce4-panel layouts shipped read-only; deposit-winmode copies the
@@ -791,6 +795,12 @@ chroot "$ROOTFS" /bin/bash -c '
   systemctl enable lightdm 2>/dev/null || true
   systemctl enable bluetooth 2>/dev/null || true
 '
+# Belt & braces: some chroot environments fail `systemctl set-default`
+# silently (swallowed above), shipping images that boot to a CONSOLE login
+# instead of the desktop. Force the symlink directly — idempotent.
+ln -sfn /lib/systemd/system/graphical.target "$ROOTFS/etc/systemd/system/default.target"
+[[ "$(basename "$(readlink "$ROOTFS/etc/systemd/system/default.target")")" == "graphical.target" ]] \
+  || { echo "[rootfs] FATAL: default.target not graphical"; exit 1; }
 # NOTE: autologin is intentionally NOT baked here. The shipped image/installer
 # must show a real login screen on a regular computer. CI enables autologin for
 # screenshots only (ci/inject-autologin.sh), on a throwaway copy of the media.

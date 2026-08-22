@@ -266,15 +266,18 @@ aqa install turbo          # (trusted source only)
 aqa list                   # list installed packages
 ```
 
-## Specifications (minimum hardware)
+## Specifications (measured on Beta 0.1.1)
 
-| Resource     | Minimum | Recommended |
-|--------------|---------|-------------|
-| Architecture | x86_64 (amd64) | x86_64; ARM64 supported (UEFI — QEMU `virt`, Pi 4/5-class; see [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1)) |
-| RAM          | 1 GB    | 2 GB+ (4 GB with Wine apps) |
-| Storage      | 10 GB   | 16 GB+ |
-| Graphics     | VGA / any (boots headless too) | GPU with open drivers for Turbo |
-| Network      | optional | Ethernet or Wi‑Fi |
+| Resource | Minimum | Recommended | Notes |
+|----------|---------|-------------|-------|
+| Architecture | x86_64 (amd64) | x86_64; ARM64 supported (UEFI — QEMU `virt`, Pi 4/5-class; [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1)) |
+| RAM | 1 GB (desktop, light use) | 2 GB desktop · 4 GB with Wine/Waydroid | Idle-desktop footprint measured automatically in CI (`deposit-idle-metrics` artifact); 1 GB works for XFCE+browser-tab-light, not for heavy apps |
+| Storage | 8 GB | 16 GB+ | Installed system ≈ **0.9 GB** (measured: extracted rootfs 908 MB incl. kernel modules); ISO ≈ **434 MB**; rest is your apps, updates and package caches |
+| Graphics | VGA / any (boots headless too) | GPU with open drivers for Turbo + compositing | Compositor ON by default since Beta 0.1.1 |
+| Network | optional | Ethernet or Wi‑Fi | |
+
+Download sizes you will actually see: `deposit-os.iso` ≈ 434 MB ·
+`deposit-arm64.img` ≈ 840–870 MB · `.mlpds` OS package ≈ 290 MB compressed.
 
 ## Status & roadmap
 

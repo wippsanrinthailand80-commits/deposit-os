@@ -218,6 +218,13 @@ jobs:
           ls -l /tmp/os-shot/os.png 2>/dev/null || echo "no png"
       - name: build disk + boot + live screenshots
         run: bash ci/live-boot.sh
+      - name: upload OS resource metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deposit-idle-metrics
+          path: /tmp/deposit-metrics.txt
+          if-no-files-found: warn
       - name: publish screenshots to job summary
         if: always()
         run: |
