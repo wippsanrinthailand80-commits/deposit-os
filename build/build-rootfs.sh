@@ -896,8 +896,7 @@ DESK
 echo "[rootfs] integrity gate:"
 FAILED=0
 for f in usr/bin/Xorg usr/bin/startxfce4 usr/sbin/lightdm \
-         usr/libexec/lightdm-gtk-greeter usr/sbin/NetworkManager \
-         usr/bin/pulseaudio /usr/local/bin/aqa; do
+         usr/sbin/NetworkManager usr/bin/pulseaudio /usr/local/bin/aqa; do
   if [[ ! -e "$ROOTFS/$f" ]]; then echo "  MISSING: $f"; FAILED=1; fi
 done
 if [[ -z "$(ls -A "$ROOTFS/usr/lib/firmware" 2>/dev/null)" ]]; then
@@ -905,6 +904,10 @@ if [[ -z "$(ls -A "$ROOTFS/usr/lib/firmware" 2>/dev/null)" ]]; then
 fi
 if [[ "$(basename "$(readlink "$ROOTFS/etc/systemd/system/default.target" 2>/dev/null)")" != "graphical.target" ]]; then
   echo "  MISSING: default.target -> graphical"; FAILED=1; fi
+# lightdm-gtk-greeter lives in /usr/sbin on Debian/Ubuntu (not libexec):
+if [[ ! -e "$ROOTFS/usr/sbin/lightdm-gtk-greeter" && ! -e "$ROOTFS/usr/libexec/lightdm-gtk-greeter" ]]; then
+  echo "  MISSING: lightdm gtk greeter (sbin|libexec)"; FAILED=1
+fi
 (( FAILED )) && { echo "[rootfs] FATAL: integrity gate failed"; exit 1; }
 echo "[rootfs] integrity gate: OK"
 
