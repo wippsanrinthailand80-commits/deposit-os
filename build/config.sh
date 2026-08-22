@@ -15,7 +15,7 @@
 DEPOSIT_NAME="deposit"
 DEPOSIT_PRETTY="Deposit OS"
 DEPOSIT_PRETTY_BETA="Deposit OS Beta"
-DEPOSIT_VERSION="0.1.0.9"
+DEPOSIT_VERSION="0.1.1"
 DEPOSIT_VERSION_CODENAME="beta"
 DEPOSIT_ID="deposit"
 DEPOSIT_ID_LIKE="ubuntu debian"          # tells .deb tooling we are compatible
@@ -82,6 +82,11 @@ DEPOSIT_ANDROID_PKGS="${DEPOSIT_ANDROID_PKGS:-waydroid adb}"
 
 # --- Bluetooth audio: A2DP profile support (AirPods/headsets work fully) ----
 DEPOSIT_BT_PKGS="${DEPOSIT_BT_PKGS:-pulseaudio-module-bluetooth bluez-obexd}"
+
+# --- Foreign Linux packages (.rpm Fedora/RHEL, Arch .pkg.tar.zst) -----------
+# Extracted into isolated prefixes (~/.deposit/rpm, ~/.deposit/arch) by
+# tools/deposit-pkg — no dependency resolution, transparently documented.
+DEPOSIT_FOREIGN_SUPPORT="${DEPOSIT_FOREIGN_SUPPORT:-1}"
 
 # --- Rounded aesthetic (kept light: theme + icon set, no heavy DE extras) ---
 DEPOSIT_THEME_PKGS="${DEPOSIT_THEME_PKGS:-materia-gtk-theme papirus-icon-theme \

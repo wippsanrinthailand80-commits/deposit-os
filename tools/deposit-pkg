@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""deposit-pkg — install foreign-format Linux packages (.rpm, .pkg.tar.zst).
+
+Deposit OS is dpkg/apt-native; these formats are installed WITHOUT dependency
+resolution into isolated user prefixes, transparently:
+
+  ~/.deposit/rpm    Fedora/RHEL/openSUSE packages  (rpm2cpio | cpio)
+  ~/.deposit/arch   Arch Linux packages            (tar --zstd)
+
+Run an extracted app with its libs found automatically:
+  deposit-pkg run rpm     someapp [args...]
+  deposit-pkg run arch    someapp [args...]
+
+Honest limits: dependencies are NOT resolved (install their rpm/zst too,
+same prefix merges them); binaries expect the target distro's glibc — most
+run against ours thanks to forward compatibility + our compat libs.
+
+Usage:
+  deposit-pkg FILE.rpm | FILE.pkg.tar.zst [...more files]
+  deposit-pkg run {rpm|arch} CMD [args...]
+  deposit-pkg list
+"""
+import os
+import subprocess
+import sys
+
+HOME = os.path.expanduser("~")
+PREFIXES = {"rpm": os.path.join(HOME, ".deposit", "rpm"),
+            "arch": os.path.join(HOME, ".deposit", "arch")}
+LIBDIRS = ["usr/lib64", "usr/lib", "lib64", "lib", "usr/local/lib"]
+
+
+def sh(cmd, **kw):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=kw.pop("timeout", 600), **kw)
+    except Exception as e:
+        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+
+
+def kind_of(path):
+    low = path.lower()
+    if low.endswith(".rpm"):
+        return "rpm"
+    if low.endswith((".pkg.tar.zst", ".pkg.tar.gz", ".pkg.tar.xz")):
+        return "arch"
+    return None
+
+
+def ensure_dir(p):
+    os.makedirs(p, exist_ok=True)
+
+
+def extract_rpm(path):
+    pre = PREFIXES["rpm"]; ensure_dir(pre)
+    r = sh(["bash", "-c", f"rpm2cpio {shlex_quote(path)} | cpio -idmD {pre}"])
+    return r
+
+
+def shlex_quote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def extract_arch(path):
+    pre = PREFIXES["arch"]; ensure_dir(pre)
+    comp = "zstd" if path.endswith(".zst") else path.rsplit(".", 1)[-1]
+    flag = {"zst": "--zstd", "gz": "--gzip", "xz": "--xz"}.get(comp, "--auto-compress")
+    return sh(["tar", flag, "-xf", path, "-C", pre])
+
+
+def install(paths):
+    rc = 0
+    for p in paths:
+        k = kind_of(p)
+        if not k:
+            print(f"[pkg] unsupported file (want .rpm / .pkg.tar.zst): {p}")
+            rc = 2
+            continue
+        if not os.path.isfile(p):
+            print(f"[pkg] file not found: {p}"); rc = 4
+            continue
+        size_mb = os.path.getsize(p) / 1048576
+        print(f"[pkg] {os.path.basename(p)} · {size_mb:.1f} MB · extracting → {PREFIXES[k]}")
+        r = extract_rpm(p) if k == "rpm" else extract_arch(p)
+        out = (r.stdout or "") + (r.stderr or "")
+        # cpio/tar are chatty; only surface errors and the final line
+        bad = [ln for ln in out.splitlines()
+               if any(x in ln.lower() for x in ("error", "cannot", "no such"))]
+        if r.returncode != 0:
+            print("\n".join(bad[:5]) or out[-400:])
+            print(f"[pkg] FAILED ({r.returncode})"); rc = r.returncode
+        else:
+            n_files = sum(len(fns) for _, _, fns in os.walk(PREFIXES[k]))
+            print(f"[pkg] ok · prefix now holds {n_files} files")
+    if rc == 0:
+        print("[pkg] run apps with:  deposit-pkg run rpm|arch CMD …")
+    return rc
+
+
+def env_for(k):
+    pre = PREFIXES[k]
+    ld = ":".join(os.path.join(pre, d) for d in LIBDIRS if os.path.isdir(os.path.join(pre, d)))
+    env = dict(os.environ)
+    if ld:
+        env["LD_LIBRARY_PATH"] = ld + ":" + env.get("LD_LIBRARY_PATH", "")
+    xdg = os.path.join(pre, "usr/share/applications")
+    if os.path.isdir(xdg):
+        env["XDG_DATA_DIRS"] = xdg + ":" + env.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
+    return env, pre
+
+
+def run_cmd(k, argv):
+    if not os.path.isdir(PREFIXES[k]):
+        print(f"[pkg] empty {k} prefix — install something first."); return 3
+    env, _ = env_for(k)
+    try:
+        os.execvpe(argv[0], argv, env)
+    except FileNotFoundError:
+        print(f"[pkg] '{argv[0]}' not found on PATH or in prefix bin dirs.")
+        bins = sorted(n for d in ("usr/bin", "bin") for n in
+                      (os.listdir(os.path.join(PREFIXES[k], d)) if os.path.isdir(os.path.join(PREFIXES[k], d)) else []))
+        if bins:
+            print("      candidates in prefix:", ", ".join(bins[:12]))
+        return 127
+
+
+def listing():
+    for k, pre in PREFIXES.items():
+        if os.path.isdir(pre):
+            n = sum(len(fns) for _, _, fns in os.walk(pre))
+            print(f"{k:6s} {pre}  ({n} files)")
+        else:
+            print(f"{k:6s} (not created yet)")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__); return 0
+    if args[0] == "list":
+        listing(); return 0
+    if args[0] == "run":
+        if len(args) < 3 or args[1] not in PREFIXES:
+            print("usage: deposit-pkg run {rpm|arch} CMD [args…]"); return 2
+        return run_cmd(args[1], args[2:])
+    return install(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

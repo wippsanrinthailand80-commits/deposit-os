@@ -129,6 +129,7 @@ cat > "$ROOTFS/etc/update-motd.d/00-deposit-beta" <<MOTD
 echo ""
 echo "  ◆ Deposit OS Beta $DEPOSIT_VERSION — Andromeda (purple-blue) · x86_64 + arm64"
 echo "  ◆ Windows-friendly: double-click .exe/.msi (Wine) · 'deposit-winmode on' for the taskbar look"
+echo "  ◆ Packages: .deb .mlpds · .apk (Android+Alpine) · .rpm/.pkg.tar.zst (deposit-pkg)"
 echo "  ◆ Kernel ~80MB • Ubuntu compat (jammy/focal) • Samsung One UI inspired"
 echo ""
 MOTD
@@ -307,6 +308,11 @@ fi
 # Bluetooth A2DP audio (AirPods/headsets) — non-fatal.
 apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_BT_PKGS \
   || echo "WARN: bluetooth-audio install issue"
+# Foreign-package extraction (.rpm / Arch .pkg.tar.zst) for deposit-pkg.
+if [ "$DEPOSIT_FOREIGN_SUPPORT" = "1" ]; then
+  apt-get \$APT_OPTS install -y --no-install-recommends rpm2cpio cpio zstd \
+    || echo "WARN: foreign-pkg tools install issue"
+fi
 EOF
 chmod +x "$ROOTFS/tmp/deposit-extra.sh"
   chroot "$ROOTFS" /tmp/deposit-extra.sh
@@ -382,6 +388,17 @@ NoDisplay=true
 MimeType=application/vnd.android.package-archive;application/gzip;application/octet-stream;application/x-archive;
 Categories=System;
 EOF
+# .rpm / Arch package handler — deposit-pkg extracts into isolated prefixes.
+cat > "$ROOTFS/usr/share/applications/deposit-pkg-open.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=RPM/Arch Package Installer (Deposit)
+Exec=deposit-pkg %f
+Terminal=false
+NoDisplay=true
+MimeType=application/x-rpm;application/x-zstd-compressed-tar;application/x-compressed-tar;
+Categories=System;
+EOF
 chroot "$ROOTFS" update-desktop-database /usr/share/applications 2>/dev/null || true
 
 # --- Stage 5b.5: IBus + Thai input (ROADMAP #1) -------------------------------
@@ -424,6 +441,7 @@ cp "$REPO_ROOT/tools/deposit-compat"         "$ROOTFS/usr/local/bin/deposit-comp
 cp "$REPO_ROOT/tools/deposit-win"            "$ROOTFS/usr/local/bin/deposit-win"
 cp "$REPO_ROOT/tools/deposit-winmode"        "$ROOTFS/usr/local/bin/deposit-winmode"
 cp "$REPO_ROOT/tools/deposit-apk"            "$ROOTFS/usr/local/bin/deposit-apk"
+cp "$REPO_ROOT/tools/deposit-pkg"            "$ROOTFS/usr/local/bin/deposit-pkg"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
          "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \
@@ -587,6 +605,12 @@ cat > "$XCONF/xfwm4.xml" <<'EOF'
     <property name="button_layout" type="string" value="O|HMC"/>
     <property name="round_edges" type="bool" value="true"/>
     <property name="titleless_maximize" type="bool" value="true"/>
+    <!-- smooth like commercial distros: compositing + subtle shadows/animations -->
+    <property name="use_compositing" type="bool" value="true"/>
+    <property name="shadow_opacity" type="uint" value="50"/>
+    <property name="show_popup_shadow" type="bool" value="true"/>
+    <property name="wrap_cycle" type="bool" value="true"/>
+    <property name="cycle_draw_frame" type="bool" value="false"/>
   </property>
 </channel>
 EOF

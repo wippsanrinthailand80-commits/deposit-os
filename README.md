@@ -6,7 +6,7 @@ Deposit OS runs standard Ubuntu/Debian `.deb` packages (via `apt`/`dpkg`),
 runs Windows installers (`.exe`/`.msi`) through Wine, and adds its own
 packaging format (`.mlpds`) with the `aqa` installer.
 
-**Beta `0.1.0.9`** · Andromeda purple-blue theme · x86_64 **and** ARM64
+**Beta `0.1.1`** · Andromeda purple-blue theme · x86_64 **and** ARM64
 
 ## Highlights
 
@@ -222,6 +222,25 @@ AirPods, Galaxy Buds and other BT headsets work at full quality:
 from **Settings → Bluetooth** or the quick menu connects straight to
 high-fidelity audio instead of the handset profile.
 
+## Fedora/RHEL (.rpm) and Arch (.pkg.tar.zst) packages
+
+```bash
+deposit-pkg app.rpm              # extract into ~/.deposit/rpm
+deposit-pkg prog.pkg.tar.zst     # extract into ~/.deposit/arch
+deposit-pkg run rpm <cmd>        # run with the prefix's libs on LD_LIBRARY_PATH
+```
+
+Extraction-only by design: dependencies are **not** resolved (install their
+packages too — prefixes merge). Binaries usually run thanks to glibc forward
+compatibility + our jammy/focal compat libs. Double-click works via mime
+handlers.
+
+## คู่มือภาษาไทย
+
+A plain-language Thai manual for everyday users ships in-tree:
+**[docs/MANUAL_TH.md](docs/MANUAL_TH.md)** — การติดตั้ง, เมนูด่วน,
+ติดตั้งโปรแกรมทุกชนิด (.exe/.apk/.rpm/.deb), Turbo, แก้ปัญหาเบื้องต้น.
+
 ## Package management quick reference
 
 ```bash
@@ -259,18 +278,16 @@ aqa list                   # list installed packages
 
 ## Status & roadmap
 
-Deposit OS is functional and reproducibly built in CI, but is still beta:
+Deposit OS is functional and reproducibly built in CI, but is **beta** — see
+[ROADMAP.md](ROADMAP.md) for the honest gap list (real-hardware kernel
+validation, ARM64 laptops, Updater-v2, A/B atomic updates, UI polish pass).
+Highlights of what is *not* done yet:
 
-- **Long-term stability** — not yet validated across a wide range of hardware.
-- **Wine layer** — packaging is validated in CI; GUI-app behaviour should be
-  play-tested per application (that's Wine).
-- **Update path** — OS updates today rely on `apt` + `aqa`; a unified,
-  user-centric updater is planned.
-- **Kernel** — tuned up for broad coverage (~50 MB packaged artifact);
-  extensively field-testing is ongoing. ARM64 tracked in
-  [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1).
-- **Docs & support** — a user manual and built-in troubleshooting tool are
-  still TODO.
+- **Real-hardware testing** — the broad kernel is QEMU-validated, not
+  field-tested across machines. Hardware testers welcome (`docs/` template).
+- **ARM64** — build + UEFI smoke-boot proven; real-laptop bring-up pending.
+- **A/B atomic updates** — designed (btrfs-snapshot route), not implemented.
+- **Updater UX** — apt+aqa today; unified one-button v2 is the next slice.
 
 ## Project layout
 
@@ -279,7 +296,7 @@ build/                 kernel + rootfs build scripts and config
   kernel-fragments/    deposit-broad.cfg, deposit-arm64.cfg, deposit-80m.cfg
 tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu,
                        deposit-settings, deposit-files, deposit-compat,
-                       deposit-win, deposit-winmode, deposit-apk, deposit-av,
+                       deposit-win, deposit-winmode, deposit-apk, deposit-pkg, deposit-av,
                        deposit-turbo-fx, deposit-security, deposit-store,
                        deposit-updater, deposit-oobe, deposit-install
 ci/                    make-disk.sh, make-iso.sh, make-arm64-image.sh,

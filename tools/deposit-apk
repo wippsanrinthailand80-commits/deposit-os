@@ -22,6 +22,7 @@ Usage:
 import os
 import subprocess
 import sys
+import time
 import zipfile
 
 ALPINE_PREFIX = os.path.expanduser("~/.deposit/alpine")
@@ -55,9 +56,31 @@ def sniff(path):
 
 
 # ----------------------------------------------------------------- android --
+def waydroid_ready():
+    """(installed, container_up)"""
+    installed = sh(["which", "waydroid"]).returncode == 0
+    if not installed:
+        return False, False
+    up = sh(["waydroid", "status"], timeout=20).returncode == 0
+    return True, up
+
+
+def start_waydroid():
+    """Bring the container up automatically (pkexec, like quickmenu power)."""
+    print("[apk] starting the Waydroid container (asks for admin once)…")
+    sh(["pkexec", "systemctl", "start", "waydroid-container.service"], timeout=60)
+    for _ in range(15):                      # wait for the session to settle
+        if sh(["waydroid", "status"], timeout=10).returncode == 0:
+            return True
+        time.sleep(2)
+    return False
+
+
 def install_android(path):
-    out = sh(["waydroid", "session", "status"])
-    if out.returncode == 0:
+    installed, up = waydroid_ready()
+    if installed and not up:
+        up = start_waydroid()
+    if installed and up:
         print("[apk] Android route: installing into the Waydroid container…")
         r = sh(["waydroid", "app", "install", path], timeout=600)
         print(r.stdout or r.stderr)
@@ -68,11 +91,14 @@ def install_android(path):
         r = sh(["adb", "install", "-r", path], timeout=600)
         print(r.stdout or r.stderr)
         sys.exit(r.returncode)
-    print("""[apk] No Android runtime found. Pick one:
+    if installed:
+        print("[apk] Waydroid is installed but the container did not come up.\n"
+              "      try:  sudo systemctl start waydroid-container && waydroid show-ui")
+    else:
+        print("""[apk] No Android runtime found. Pick one:
 
   • Run Android apps on this machine (Waydroid container):
-      sudo waydroid init && sudo systemctl start waydroid-container
-      then start "Waydroid" from the menu and retry.
+      sudo waydroid init && sudo systemctl enable --now waydroid-container
 
   • Or plug in an Android phone with USB debugging enabled (adb).""")
     sys.exit(4)
