@@ -682,7 +682,8 @@ GREETER
 # Two full xfce4-panel layouts shipped read-only; deposit-winmode copies the
 # chosen one into the user's xfconf and restarts the panel. No root needed
 # at runtime.
-mkdir -p "$ROOTFS/usr/share/deposit/winmode"cat > "$ROOTFS/usr/share/deposit/winmode/deposit-panel.xml" <<'EOF'
+mkdir -p "$ROOTFS/usr/share/deposit/winmode"
+cat > "$ROOTFS/usr/share/deposit/winmode/deposit-panel.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
   <property name="panels" type="array">
