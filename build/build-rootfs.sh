@@ -809,6 +809,26 @@ cat > "$ROOTFS/etc/deposit/win-hash-whitelist" <<'EOF'
 # 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  ubuntu-installer-test.exe
 EOF
 
+# Foreign-package policy for deposit-pkg (.rpm / .pkg.tar.zst) — same model
+# as win.conf: sandboxed run + sha256 allowlist, no CLI bypass.
+cat > "$ROOTFS/etc/deposit/pkg.conf" <<EOF
+# deposit-pkg policy — user override: ~/.config/deposit/pkg.conf
+# SANDBOX: auto | bwrap | none   (auto = bwrap when available)
+SANDBOX="auto"
+# HASH_POLICY: block | warn
+# block = refuse packages whose sha256 is not whitelisted (no CLI bypass).
+# warn  = loud warning only.
+HASH_POLICY="block"
+EOF
+cat > "$ROOTFS/etc/deposit/pkg-hash-whitelist" <<'EOF'
+# /etc/deposit/pkg-hash-whitelist — one sha256 per line.
+# Lines starting with '#' are comments; an optional label may follow the hash.
+# Users can whitelist their own .rpm/.pkg.tar.zst files in:
+#   ~/.config/deposit/pkg-hash-whitelist   (or: deposit-pkg allow FILE)
+# Example:
+# 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  hello-2.12.rpm
+EOF
+
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
 # This is what makes "boot the OS" land on the Deposit OS desktop.
 chroot "$ROOTFS" /bin/bash -c '

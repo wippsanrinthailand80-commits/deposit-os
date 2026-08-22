@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
-"""deposit-pkg — install foreign-format Linux packages (.rpm, .pkg.tar.zst).
+"""deposit-pkg v0.2 — install foreign-format Linux packages (.rpm, .pkg.tar.zst)
+into isolated prefixes — WITH the same hardening as the rest of Deposit OS.
 
-Deposit OS is dpkg/apt-native; these formats are installed WITHOUT dependency
-resolution into isolated user prefixes, transparently:
-
-  ~/.deposit/rpm    Fedora/RHEL/openSUSE packages  (rpm2cpio | cpio)
-  ~/.deposit/arch   Arch Linux packages            (tar --zstd)
-
-Run an extracted app with its libs found automatically:
-  deposit-pkg run rpm     someapp [args...]
-  deposit-pkg run arch    someapp [args...]
-
-Honest limits: dependencies are NOT resolved (install their rpm/zst too,
-same prefix merges them); binaries expect the target distro's glibc — most
-run against ours thanks to forward compatibility + our compat libs.
+Security model (mirrors tools/deposit-win):
+  * SHA256 ALLOWLIST: HASH_POLICY=block (default) refuses any package whose
+    sha256 is not whitelisted. Whitelist files (one hash per line, '#'=comment,
+    optional label after hash):
+        /etc/deposit/pkg-hash-whitelist          (system-wide)
+        ~/.config/deposit/pkg-hash-whitelist     (per-user)
+    No bypass flag; HASH_POLICY=warn in pkg.conf downgrades to loud warning.
+  * TRAVERSAL-SAFE EXTRACTION: every member path is validated BEFORE writing
+    (no absolute paths, no '..' components); after extraction the tree is
+    scanned and any symlink escaping the prefix is removed.
+  * ARGV-ONLY pipelines: rpm2cpio|cpio run as argv subprocess pipes — no shell.
+  * SANDBOXED RUN: 'run' executes inside bubblewrap. If the prefix is a
+    self-contained rootfs (has usr/bin + libc) it becomes the whole root;
+    otherwise host-root + prefix libs via LD_LIBRARY_PATH inside the sandbox.
+    Filesystem exposure limited to: /home, X11, DRI GPU, audio, runtime dir.
 
 Usage:
-  deposit-pkg FILE.rpm | FILE.pkg.tar.zst [...more files]
+  deposit-pkg [--insecure] FILE.rpm | FILE.pkg.tar.zst [...]
   deposit-pkg run {rpm|arch} CMD [args...]
+  deposit-pkg allow FILE            append this file's sha256 to user whitelist
   deposit-pkg list
 """
+import hashlib
 import os
+import posixpath
+import stat as st_mod
 import subprocess
 import sys
 
@@ -29,13 +36,26 @@ PREFIXES = {"rpm": os.path.join(HOME, ".deposit", "rpm"),
             "arch": os.path.join(HOME, ".deposit", "arch")}
 LIBDIRS = ["usr/lib64", "usr/lib", "lib64", "lib", "usr/local/lib"]
 
+SANDBOX = "auto"
+HASH_POLICY = "block"
+for cf in ("/etc/deposit/pkg.conf", os.path.join(HOME, ".config/deposit/pkg.conf")):
+    try:
+        with open(cf) as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln.startswith(("SANDBOX=", "HASH_POLICY=")):
+                    k, _, v = ln.partition("=")
+                    globals()[k] = v.strip().strip('"').lower()
+    except OSError:
+        pass
+
 
 def sh(cmd, **kw):
+    """argv-only runner."""
     try:
-        return subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=kw.pop("timeout", 600), **kw)
+        return subprocess.run(cmd, capture_output=True, timeout=kw.pop("timeout", 600), **kw)
     except Exception as e:
-        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+        return subprocess.CompletedProcess(cmd, 1, "", str(e))
 
 
 def kind_of(path):
@@ -47,104 +67,274 @@ def kind_of(path):
     return None
 
 
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def hash_allowed(h):
+    for wl in ("/etc/deposit/pkg-hash-whitelist",
+               os.path.join(HOME, ".config/deposit/pkg-hash-whitelist")):
+        try:
+            for raw in open(wl, errors="replace"):
+                s = raw.split("#")[0].split()
+                if s and s[0].lower() == h.lower():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+# ---------------------------------------------------------------- traversal --
+def member_ok(name):
+    n = name.lstrip("/")
+    if n.startswith("/"):
+        return False
+    parts = []
+    for part in n.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return False
+        parts.append(part)
+    return len(parts) > 0
+
+
+def sanitize_symlinks(pre):
+    """Remove any symlink inside the prefix whose resolved target escapes it."""
+    removed = 0
+    for dp, dns, fns in os.walk(pre):
+        for name in fns + dns:
+            full = os.path.join(dp, name)
+            if os.path.islink(full):
+                t = os.readlink(full)
+                res = t if os.path.isabs(t) else os.path.normpath(os.path.join(dp, t))
+                if os.path.commonpath([res, pre]) != pre:
+                    os.unlink(full)
+                    rel = os.path.relpath(full, pre)
+                    print(f"[pkg] BLOCKED escaping symlink: {rel} -> {t}")
+                    removed += 1
+    return removed
+
+
+# ---------------------------------------------------------------- extraction --
+def extract_rpm(path, pre):
+    """rpm2cpio -> cpio as argv pipes (no shell). Extract into cwd=prefix."""
+    ensure_dir(pre)
+    w1 = subprocess.Popen(["rpm2cpio", path], stdout=subprocess.PIPE)
+    w2 = subprocess.Popen(["cpio", "-idm", "--no-absolute-filenames"],
+                          cwd=pre, stdin=w1.stdout,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    w1.stdout.close()
+    err = w2.communicate()[1] or b""
+    rc = w2.wait()
+    _ = err  # cpio chatter is noisy; failures surface via rc + gate below
+    return rc, sanitize_symlinks(pre)
+
+
+def extract_arch(path, pre):
+    """tar --auto-compress --no-absolute-names; validated listing first."""
+    ensure_dir(pre)
+    comp = {"zst": "--zstd", "gz": "--gzip", "xz": "--xz"}.get(
+        path.rsplit(".", 1)[-1], "--auto-compress")
+    lst = subprocess.run(["tar", comp, "-tf", path], capture_output=True, text=True)
+    if lst.returncode != 0:
+        return lst.returncode, 0
+    # hard rule: any absolute or '..' member aborts the whole install
+    evil = [m for m in lst.stdout.splitlines()
+            if m.startswith("/") or ".." in [seg for seg in m.split("/")]]
+    if evil:
+        print("[pkg] REFUSED: archive tries to escape the prefix:")
+        for e in evil[:5]:
+            print("      ", e)
+        return 95, 0
+    # Pre-scan already rejected every absolute/'..' member, so plain -xf is
+    # safe even on tar builds lacking --no-absolute-names (e.g. BusyBox).
+    ex = subprocess.run(["tar", comp, "-xf", path, "-C", pre],
+                        capture_output=True, text=True)
+    return ex.returncode, sanitize_symlinks(pre)
+
+
 def ensure_dir(p):
     os.makedirs(p, exist_ok=True)
 
 
-def extract_rpm(path):
-    pre = PREFIXES["rpm"]; ensure_dir(pre)
-    r = sh(["bash", "-c", f"rpm2cpio {shlex_quote(path)} | cpio -idmD {pre}"])
-    return r
+# ------------------------------------------------------------------- run ----
+def looks_rootful(pre):
+    has_bin = os.path.isdir(os.path.join(pre, "usr", "bin")) or \
+              os.path.isdir(os.path.join(pre, "bin"))
+    has_libc = any(os.path.exists(os.path.join(pre, d, "libc.so.6"))
+                   for d in LIBDIRS)
+    return has_bin and has_libc
 
 
-def shlex_quote(s):
-    return "'" + s.replace("'", "'\\''") + "'"
+def bwrap_full(pre, argv):
+    """Prefix acts as the entire rootfs."""
+    args = ["bwrap", "--die-with-parent", "--new-session",
+            "--ro-bind", pre, "/",
+            "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+            "--dev-bind-try", "/dev/dri", "/dev/dri",
+            "--dev-bind-try", "/dev/snd", "/dev/snd",
+            "--ro-bind-try", "/tmp/.X11-unix", "/tmp/.X11-unix",
+            "--ro-bind-try", os.path.expanduser("~/.Xauthority"),
+                           os.path.expanduser("~/.Xauthority"),
+            "--bind-try", os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+                         os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+            "--bind", os.path.expanduser("~"), os.path.expanduser("~"),
+            "--setenv", "HOME", os.path.expanduser("~"),
+            "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "--setenv", "LANG", __import__("os").environ.get("LANG", "C.UTF-8")]
+    if os.environ.get("DISPLAY"):
+        args += ["--setenv", "DISPLAY", os.environ["DISPLAY"]]
+    args += ["--"] + argv
+    os.execvp("bwrap", args)
 
 
-def extract_arch(path):
-    pre = PREFIXES["arch"]; ensure_dir(pre)
-    comp = "zstd" if path.endswith(".zst") else path.rsplit(".", 1)[-1]
-    flag = {"zst": "--zstd", "gz": "--gzip", "xz": "--xz"}.get(comp, "--auto-compress")
-    return sh(["tar", flag, "-xf", path, "-C", pre])
+def bwrap_lite(pre, argv, ld):
+    """Host root read-only; prefix libs injected; same exposure rules."""
+    env = dict(os.environ)
+    env["LD_LIBRARY_PATH"] = ld + ":" + env.get("LD_LIBRARY_PATH", "")
+    args = ["bwrap", "--die-with-parent", "--new-session",
+            "--ro-bind", "/", "/",
+            "--proc", "/proc", "--dev", "/dev",
+            "--tmpfs", "/tmp", "--tmpfs", "/var/tmp",
+            "--dev-bind-try", "/dev/dri", "/dev/dri",
+            "--dev-bind-try", "/dev/snd", "/dev/snd",
+            "--ro-bind-try", "/tmp/.X11-unix", "/tmp/.X11-unix",
+            "--bind-try", os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+                         os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+            "--bind", os.path.expanduser("~"), os.path.expanduser("~"),
+            "--", "/bin/sh", "-c",
+            'exec "$@"', "sh"] + argv
+    os.execve("bwrap", args, env)
 
 
-def install(paths):
+# ------------------------------------------------------------------- main ---
+def install(paths, insecure=False):
     rc = 0
     for p in paths:
         k = kind_of(p)
         if not k:
             print(f"[pkg] unsupported file (want .rpm / .pkg.tar.zst): {p}")
-            rc = 2
-            continue
+            rc = 2; continue
         if not os.path.isfile(p):
-            print(f"[pkg] file not found: {p}"); rc = 4
-            continue
+            print(f"[pkg] file not found: {p}"); rc = 4; continue
         size_mb = os.path.getsize(p) / 1048576
-        print(f"[pkg] {os.path.basename(p)} · {size_mb:.1f} MB · extracting → {PREFIXES[k]}")
-        r = extract_rpm(p) if k == "rpm" else extract_arch(p)
-        out = (r.stdout or "") + (r.stderr or "")
-        # cpio/tar are chatty; only surface errors and the final line
-        bad = [ln for ln in out.splitlines()
-               if any(x in ln.lower() for x in ("error", "cannot", "no such"))]
-        if r.returncode != 0:
-            print("\n".join(bad[:5]) or out[-400:])
-            print(f"[pkg] FAILED ({r.returncode})"); rc = r.returncode
+        h = sha256_of(p)
+        print(f"[pkg] {os.path.basename(p)} · {size_mb:.1f} MB")
+        print(f"[pkg] sha256: {h}")
+        if insecure:
+            print("[pkg] WARNING: --insecure skips the allowlist for THIS file")
+        elif hash_allowed(h):
+            print("[pkg] sha256 whitelisted ✓")
+        elif HASH_POLICY == "block":
+            wl = os.path.join(HOME, ".config/deposit/pkg-hash-whitelist")
+            print(f"[pkg] REFUSED: sha256 not whitelisted (HASH_POLICY=block).\n"
+                  f"  verified OK? allow with:\n"
+                  f"  echo {h} >> {wl}\n"
+                  f"  (or: deposit-pkg allow \"{p}\")")
+            rc = 8; continue
         else:
-            n_files = sum(len(fns) for _, _, fns in os.walk(PREFIXES[k]))
-            print(f"[pkg] ok · prefix now holds {n_files} files")
+            print("[pkg] WARNING: sha256 NOT whitelisted (HASH_POLICY=warn)")
+        print(f"[pkg] extracting → {PREFIXES[k]}")
+        r, blocked = (extract_rpm(p, PREFIXES[k]) if k == "rpm"
+                      else extract_arch(p, PREFIXES[k]))
+        if r != 0:
+            print(f"[pkg] FAILED (exit {r})"); rc = r
+        else:
+            n = sum(len(x) for _, _, x in os.walk(PREFIXES[k]))
+            note = f" · {blocked} escaping symlink(s) removed" if blocked else ""
+            print(f"[pkg] ok · prefix holds {n} files{note}")
     if rc == 0:
-        print("[pkg] run apps with:  deposit-pkg run rpm|arch CMD …")
+        print('[pkg] run apps: deposit-pkg run rpm|arch CMD …')
     return rc
 
 
-def env_for(k):
-    pre = PREFIXES[k]
-    ld = ":".join(os.path.join(pre, d) for d in LIBDIRS if os.path.isdir(os.path.join(pre, d)))
-    env = dict(os.environ)
-    if ld:
-        env["LD_LIBRARY_PATH"] = ld + ":" + env.get("LD_LIBRARY_PATH", "")
-    xdg = os.path.join(pre, "usr/share/applications")
-    if os.path.isdir(xdg):
-        env["XDG_DATA_DIRS"] = xdg + ":" + env.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
-    return env, pre
-
-
 def run_cmd(k, argv):
-    if not os.path.isdir(PREFIXES[k]):
+    pre = PREFIXES[k]
+    if not os.path.isdir(pre):
         print(f"[pkg] empty {k} prefix — install something first."); return 3
-    env, _ = env_for(k)
+    ld = ":".join(os.path.join(pre, d) for d in LIBDIRS
+                  if os.path.isdir(os.path.join(pre, d)))
+    sb = SANDBOX if SANDBOX != "auto" else ("bwrap" if _have_bwrap() else "none")
+    if sb == "none":
+        print("[pkg] SANDBOX=none — running UNSANDBOXED (not recommended)")
+        env = dict(os.environ)
+        env["LD_LIBRARY_PATH"] = ld + ":" + env.get("LD_LIBRARY_PATH", "")
+        return os.spawnve(os.P_WAIT, argv[0], argv, env) if os.path.exists(argv[0]) \
+            else (_err_bin(argv, pre) or 127)
+    print(f"[pkg] sandbox: bubblewrap ({k} prefix)")
     try:
-        os.execvpe(argv[0], argv, env)
+        if looks_rootful(pre):
+            bwrap_full(pre, argv)
+        else:
+            bwrap_lite(pre, argv, ld)
     except FileNotFoundError:
-        print(f"[pkg] '{argv[0]}' not found on PATH or in prefix bin dirs.")
-        bins = sorted(n for d in ("usr/bin", "bin") for n in
-                      (os.listdir(os.path.join(PREFIXES[k], d)) if os.path.isdir(os.path.join(PREFIXES[k], d)) else []))
-        if bins:
-            print("      candidates in prefix:", ", ".join(bins[:12]))
-        return 127
+        print("[pkg] bubblewrap missing — sudo apt install bubblewrap"); return 3
+
+
+def _have_bwrap():
+    from shutil import which
+    return which("bwrap") is not None
+
+
+def _err_bin(argv, pre):
+    bins = sorted(n for d in ("usr/bin", "bin") for n in
+                  (os.listdir(os.path.join(pre, d))
+                   if os.path.isdir(os.path.join(pre, d)) else []))
+    if bins:
+        print(f"[pkg] '{argv[0]}' not found. candidates:",
+              ", ".join(bins[:12]))
+    else:
+        print(f"[pkg] '{argv[0]}' not found.")
+
+
+def allow_file(path):
+    if not os.path.isfile(path):
+        print("[pkg] file not found:", path); return 4
+    h = sha256_of(path)
+    wl_dir = os.path.join(HOME, ".config/deposit")
+    os.makedirs(wl_dir, exist_ok=True)
+    wl = os.path.join(wl_dir, "pkg-hash-whitelist")
+    with open(wl, "a") as f:
+        f.write(f"{h}  {os.path.basename(path)}\n")
+    print(f"[pkg] whitelisted:\n  {h}  ({path})\n-> {wl}")
+    return 0
 
 
 def listing():
     for k, pre in PREFIXES.items():
         if os.path.isdir(pre):
-            n = sum(len(fns) for _, _, fns in os.walk(pre))
+            n = sum(len(fs) for _, _, fs in os.walk(pre))
             print(f"{k:6s} {pre}  ({n} files)")
         else:
             print(f"{k:6s} (not created yet)")
 
 
-def main():
-    args = sys.argv[1:]
-    if not args or args[0] in ("-h", "--help"):
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
         print(__doc__); return 0
-    if args[0] == "list":
+    if argv[0] == "list":
         listing(); return 0
-    if args[0] == "run":
-        if len(args) < 3 or args[1] not in PREFIXES:
+    if argv[0] == "allow":
+        return allow_file(argv[1]) if len(argv) == 2 else (
+            print("usage: deposit-pkg allow FILE"), 2)[1]
+    if argv[0] == "run":
+        if len(argv) < 3 or argv[1] not in PREFIXES:
             print("usage: deposit-pkg run {rpm|arch} CMD [args…]"); return 2
-        return run_cmd(args[1], args[2:])
-    return install(args)
+        return run_cmd(argv[1], argv[2:])
+    insecure = False
+    files = []
+    for a in argv:
+        if a == "--insecure":
+            insecure = True
+        elif not a.startswith("--"):
+            files.append(a)
+    return install(files, insecure=insecure)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

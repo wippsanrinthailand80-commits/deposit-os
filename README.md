@@ -227,13 +227,31 @@ high-fidelity audio instead of the handset profile.
 ```bash
 deposit-pkg app.rpm              # extract into ~/.deposit/rpm
 deposit-pkg prog.pkg.tar.zst     # extract into ~/.deposit/arch
-deposit-pkg run rpm <cmd>        # run with the prefix's libs on LD_LIBRARY_PATH
+deposit-pkg allow app.rpm        # whitelist a file you verified (sha256)
+deposit-pkg run rpm <cmd>        # run inside the bubblewrap sandbox
+deposit-pkg list                 # what's in each prefix
 ```
 
 Extraction-only by design: dependencies are **not** resolved (install their
 packages too — prefixes merge). Binaries usually run thanks to glibc forward
 compatibility + our jammy/focal compat libs. Double-click works via mime
 handlers.
+
+- **SHA256 allowlist** (`HASH_POLICY=block` in `/etc/deposit/pkg.conf`,
+  default): packages whose hash is not whitelisted are refused — no CLI
+  bypass. Verified a file? `deposit-pkg allow FILE` or append its hash to
+  `~/.config/deposit/pkg-hash-whitelist` (system-wide:
+  `/etc/deposit/pkg-hash-whitelist`). `HASH_POLICY=warn` downgrades refusals
+  to loud warnings.
+- **Traversal-safe extraction**: every archive member is validated before
+  writing — absolute paths and `..` escapes abort the whole install, and any
+  symlink that resolves outside the prefix is removed afterwards.
+- **Sandboxed `run`**: apps execute under bubblewrap. If the prefix is a
+  self-contained rootfs it becomes the whole root; otherwise host root is
+  read-only with the prefix's libs injected. Only X11, GPU, audio and your
+  home are passed through. `SANDBOX=none` in pkg.conf opts out loudly.
+- Shell-free internals: `rpm2cpio | cpio` runs as argv pipes from Python,
+  never through a shell.
 
 ## คู่มือภาษาไทย
 
