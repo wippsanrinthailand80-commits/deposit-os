@@ -212,6 +212,10 @@ fi
 
 # --- Stage 4: light first-boot setup (no systemd bloat on old HW) -----------
 # Provide a simple, fast getty + network-online target. Keep services minimal.
+# NOTE: do NOT clean apt lists here — later stages (5b/5c) still install
+# packages; wiping /var/lib/apt/lists made every one of those installs fail
+# with "Unable to locate package" and the || WARN guards hid it for months.
+# The cleanup moved to the very end of this script.
 chroot "$ROOTFS" /bin/bash -c '
   set -e
   systemctl set-default multi-user.target 2>/dev/null || true
@@ -222,8 +226,6 @@ chroot "$ROOTFS" /bin/bash -c '
            fwupd.service avahi-daemon.service; do
     systemctl mask "$u" 2>/dev/null || true
   done
-  apt-get clean
-  rm -rf /var/lib/apt/lists/*
 '
 
 # --- Stage 5: default user --------------------------------------------------
@@ -281,6 +283,8 @@ cat > "$ROOTFS/tmp/deposit-extra.sh" <<EOF
 # Non-fatal: an unavailable optional package must not break the whole image.
 export DEBIAN_FRONTEND=noninteractive
 APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180"
+# Stage 4 no longer wipes lists, but re-update anyway (belt & braces):
+apt-get \$APT_OPTS update -qq || true
 apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_THEME_PKGS \
   || echo "WARN: theme install issue"
 apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_APPS \
@@ -894,6 +898,9 @@ if [[ "$(basename "$(readlink "$ROOTFS/etc/systemd/system/default.target" 2>/dev
   echo "  MISSING: default.target -> graphical"; FAILED=1; fi
 (( FAILED )) && { echo "[rootfs] FATAL: integrity gate failed"; exit 1; }
 echo "[rootfs] integrity gate: OK"
+
+# Space-saving cleanup LAST — after every apt consumer has finished.
+chroot "$ROOTFS" /bin/bash -c 'apt-get clean; rm -rf /var/lib/apt/lists/*' || true
 
 # Strip the cross-build interpreter so the shipped image stays clean.
 if (( CROSS )); then
