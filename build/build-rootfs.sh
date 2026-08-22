@@ -292,10 +292,97 @@ if [ "$DEPOSIT_WIN_SUPPORT" = "1" ]; then
   apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_WIN_PKGS \
     || echo "WARN: windows-support install issue (wine/ntfs)"
 fi
+# Android layer (Beta 0.1.0.9): Waydroid repo is outside the Ubuntu archive;
+# add key+source best-effort, then install waydroid+adb (non-fatal).
+# Requires kernel Binder (CONFIG_ANDROID_BINDERFS=y in deposit-80m.cfg).
+if [ "$DEPOSIT_ANDROID_SUPPORT" = "1" ]; then
+  curl -fsSL --max-time 30 https://repo.waydro.id/waydroid.gpg \
+    -o /usr/share/keyrings/waydroid.gpg 2>/dev/null \
+    && echo "deb [signed-by=/usr/share/keyrings/waydroid.gpg] https://repo.waydro.id/ $DEPOSIT_SUITE main" \
+       > /etc/apt/sources.list.d/waydroid.list \
+    || echo "WARN: could not add waydroid repo"
+  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_ANDROID_PKGS \
+    || echo "WARN: android install issue (waydroid/adb)"
+fi
+# Bluetooth A2DP audio (AirPods/headsets) — non-fatal.
+apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_BT_PKGS \
+  || echo "WARN: bluetooth-audio install issue"
 EOF
 chmod +x "$ROOTFS/tmp/deposit-extra.sh"
   chroot "$ROOTFS" /tmp/deposit-extra.sh
   rm -f "$ROOTFS/tmp/deposit-extra.sh"
+
+# --- Alpine .apk support: ship a static apk-tools (Alpine Package Keeper) ----
+# NOTE: ".apk" is TWO different formats. Android APK = zip with
+# AndroidManifest.xml. Alpine apk = signed tar.gz installed by apk-tools.
+# deposit-apk detects the kind and routes accordingly. This block fetches the
+# official static binary from dl-cdn.alpinelinux.org at BUILD time (runtime
+# stays offline-friendly) and strips its two signature header lines.
+if [[ "${DEPOSIT_ALPINE_SUPPORT:-1}" == "1" ]]; then
+  case "$(deposit_debootstrap_arch)" in
+    amd64)  ALP_ARCH="x86_64"  ;;
+    arm64)  ALP_ARCH="aarch64" ;;
+    armhf)  ALP_ARCH="armv7"   ;;
+    *)      ALP_ARCH="x86_64"  ;;
+  esac
+  ALP_MIRROR="${DEPOSIT_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
+  ALP_BRANCH="${DEPOSIT_ALPINE_BRANCH:-latest-stable}"
+  echo "[rootfs] fetching apk-tools-static ($ALP_ARCH) for Alpine .apk support"
+  IDX="$(mktemp)"
+  if curl -fsSL --max-time 45 "$ALP_MIRROR/$ALP_BRANCH/main/$ALP_ARCH/" -o "$IDX"; then
+    APKF="$(grep -o 'apk-tools-static-[^\"]*\.apk' "$IDX" | head -1 || true)"
+    if [[ -n "$APKF" ]]; then
+      mkdir -p "$ROOTFS/usr/local/libexec"
+      curl -fsSL --max-time 90 "$ALP_MIRROR/$ALP_BRANCH/main/$ALP_ARCH/$APKF" -o /tmp/apks.apk \
+      && python3 - /tmp/apks.apk "$ROOTFS/usr/local/libexec/apk.static" <<'PY'
+import io, sys, tarfile, zlib
+raw = open(sys.argv[1], "rb").read()
+# v2 layout: "Q1<hex>\nQ2<u32be len><rsa-sig>" then concatenated gzip tars.
+# Parse structurally (never scan for \n inside binary).
+i = raw.index(b"\n") + 1
+if raw[i:i+2] != b"Q2":
+    sys.exit("unexpected apk-tools-static header")
+L = int.from_bytes(raw[i+2:i+6], "big")
+rest = raw[i+6+L:]
+chunks = []
+while rest[:2] == b"\x1f\x8b":          # gzip magic, member by member
+    dobj = zlib.decompressobj(31)
+    try:
+        chunks.append(dobj.decompress(rest))
+    except zlib.error:
+        break
+    rest = dobj.unused_data.lstrip(b"\x00")
+if not chunks:
+    sys.exit("no gzip members in apk-tools-static")
+# control and data are SEPARATE tar members; scan each (tarfile stops at the
+# first end-of-archive marker, so one combined open would miss sbin/).
+for data in chunks:
+    with tarfile.open(fileobj=io.BytesIO(data)) as tf:
+        for m in tf.getmembers():
+            if m.name == "sbin/apk.static":
+                open(sys.argv[2], "wb").write(tf.extractfile(m).read())
+                print(f"[rootfs] apk.static extracted ({m.size} bytes)")
+                sys.exit(0)
+sys.exit("apk.static not found in package")
+PY
+      chmod 755 "$ROOTFS/usr/local/libexec/apk.static" 2>/dev/null || true
+    else echo "WARN: no apk-tools-static found on mirror index"; fi
+  else echo "WARN: alpine CDN unreachable (apk support degraded)"; fi
+  rm -f "$IDX" /tmp/apks.apk
+fi
+
+# .apk double-click handler — deposit-apk sniffs Android vs Alpine format.
+cat > "$ROOTFS/usr/share/applications/deposit-apk-open.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=APK Installer (Deposit)
+Exec=deposit-apk %f
+Terminal=false
+NoDisplay=true
+MimeType=application/vnd.android.package-archive;application/gzip;application/octet-stream;application/x-archive;
+Categories=System;
+EOF
+chroot "$ROOTFS" update-desktop-database /usr/share/applications 2>/dev/null || true
 
 # --- Stage 5b.5: IBus + Thai input (ROADMAP #1) -------------------------------
 # Fonts already render Thai; this makes it *typeable* via IBus (Super+Space to
@@ -336,6 +423,7 @@ cp "$REPO_ROOT/tools/deposit-settings"       "$ROOTFS/usr/local/bin/deposit-sett
 cp "$REPO_ROOT/tools/deposit-compat"         "$ROOTFS/usr/local/bin/deposit-compat"
 cp "$REPO_ROOT/tools/deposit-win"            "$ROOTFS/usr/local/bin/deposit-win"
 cp "$REPO_ROOT/tools/deposit-winmode"        "$ROOTFS/usr/local/bin/deposit-winmode"
+cp "$REPO_ROOT/tools/deposit-apk"            "$ROOTFS/usr/local/bin/deposit-apk"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
          "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \

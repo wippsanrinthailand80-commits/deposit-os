@@ -91,6 +91,22 @@ if [[ -n "${CROSS_COMPILE:-}" ]]; then MAKE_VARS+=(CROSS_COMPILE="$CROSS_COMPILE
 echo "[kernel] target arch: $KARCH${CROSS_COMPILE:+ (cross: $CROSS_COMPILE)}"
 
 # --- Configure (start from a tiny kernel, then enable what we need) ----------
+# Fragment staleness guard: if any fragment changed since the last build,
+# drop the cached .config so new CONFIG lines actually take effect.
+frag_sig() {
+  local f
+  for f in deposit-broad.cfg deposit-arm64.cfg deposit-80m.cfg; do
+    [[ -f "$SCRIPT_DIR/kernel-fragments/$f" ]] && cat "$SCRIPT_DIR/kernel-fragments/$f"
+  done | sha256sum | cut -d' ' -f1
+}
+if [[ -f .config ]]; then
+  CUR_SIG="$(frag_sig | sha256sum | cut -d' ' -f1)"
+  OLD_SIG="$(cat .config.deposit-sig 2>/dev/null || echo none)"
+  if [[ "$CUR_SIG" != "$OLD_SIG" ]]; then
+    echo "[kernel] fragments changed ($OLD_SIG -> $CUR_SIG); reconfiguring"
+    rm -f .config
+  fi
+fi
 if [[ ! -f .config ]]; then
   if (( DEPOSIT_KERNEL_TINY )); then
     echo "[kernel] tinyconfig"
@@ -267,6 +283,8 @@ X86
 
   echo "[kernel] olddefconfig"
   make "${MAKE_VARS[@]}" olddefconfig
+  # remember the fragment signature this config was generated from
+  frag_sig | sha256sum | cut -d' ' -f1 > .config.deposit-sig
 fi
 
 if (( MENU )); then

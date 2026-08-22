@@ -15,7 +15,7 @@
 DEPOSIT_NAME="deposit"
 DEPOSIT_PRETTY="Deposit OS"
 DEPOSIT_PRETTY_BETA="Deposit OS Beta"
-DEPOSIT_VERSION="0.1.0.8"
+DEPOSIT_VERSION="0.1.0.9"
 DEPOSIT_VERSION_CODENAME="beta"
 DEPOSIT_ID="deposit"
 DEPOSIT_ID_LIKE="ubuntu debian"          # tells .deb tooling we are compatible
@@ -73,6 +73,15 @@ DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm xfce4
 DEPOSIT_WIN_SUPPORT="${DEPOSIT_WIN_SUPPORT:-1}"
 DEPOSIT_WIN_PKGS="${DEPOSIT_WIN_PKGS:-wine wine64 winetricks fonts-wine ntfs-3g \
   bubblewrap firejail fonts-crosextra-carlito}"
+
+# --- Android layer (Beta 0.1.0.9): run .apk apps via Waydroid ---------------
+# Waydroid needs the waydroid repo (not in Ubuntu archive) + kernel Binder
+# (enabled in deposit-80m.cfg). adb covers sideloading to physical phones.
+DEPOSIT_ANDROID_SUPPORT="${DEPOSIT_ANDROID_SUPPORT:-1}"
+DEPOSIT_ANDROID_PKGS="${DEPOSIT_ANDROID_PKGS:-waydroid adb}"
+
+# --- Bluetooth audio: A2DP profile support (AirPods/headsets work fully) ----
+DEPOSIT_BT_PKGS="${DEPOSIT_BT_PKGS:-pulseaudio-module-bluetooth bluez-obexd}"
 
 # --- Rounded aesthetic (kept light: theme + icon set, no heavy DE extras) ---
 DEPOSIT_THEME_PKGS="${DEPOSIT_THEME_PKGS:-materia-gtk-theme papirus-icon-theme \

@@ -6,7 +6,7 @@ Deposit OS runs standard Ubuntu/Debian `.deb` packages (via `apt`/`dpkg`),
 runs Windows installers (`.exe`/`.msi`) through Wine, and adds its own
 packaging format (`.mlpds`) with the `aqa` installer.
 
-**Beta `0.1.0.8`** · Andromeda purple-blue theme · x86_64 **and** ARM64
+**Beta `0.1.0.9`** · Andromeda purple-blue theme · x86_64 **and** ARM64
 
 ## Highlights
 
@@ -21,8 +21,13 @@ packaging format (`.mlpds`) with the `aqa` installer.
   with native `.mlpds` support and direct `.deb`/`apt` compatibility.
   `.mlpds` are GPG-signed and verified on install.
 - **Windows-friendly**: double-click a Windows installer and it just runs
-  (Wine, as your user); flip to a **Windows-style taskbar with a Start
-  button** any time; NTFS/exFAT drives read-write out of the box.
+  (Wine, sandboxed, as your user); flip to a **Windows-style taskbar with a
+  Start button** any time; NTFS/exFAT drives read-write out of the box.
+- **Both kinds of `.apk`**: Android apps run in a Waydroid container (or
+  sideload to a phone via adb), and Alpine-format `.apk` packages install
+  into an isolated prefix via apk-tools — auto-detected per file.
+- **Bluetooth audio done right**: A2DP profile support so AirPods and other
+  BT headsets pair and play at high quality.
 - **Turbo mode**: one command flips CPU/GPU into maximum performance with a
   spinning/fade transition FX.
 - **Samsung-style quick menu** (`Super+Q`): Wi‑Fi, Airplane, Turbo, LAN,
@@ -186,6 +191,37 @@ deposit-winmode toggle      # or tap "Windows Mode" in Settings
 - NTFS (kernel `ntfs3` + `ntfs-3g`) and exFAT drives mount read-write.
 - Lean build? `DEPOSIT_WIN_SUPPORT=0` drops the whole layer.
 
+## Android & Alpine `.apk` packages
+
+`.apk` is two different formats; `deposit-apk` detects which one a file is
+and routes it automatically:
+
+```bash
+deposit-apk app.apk            # install (auto-detect: Android or Alpine)
+deposit-apk --android game.apk # force the Waydroid/adb route
+deposit-apk --alpine pkg.apk   # force the apk-tools route
+deposit-apk run <binary>       # run an app installed from the Alpine prefix
+deposit-apk list               # what's in the Alpine prefix
+```
+
+**Android APKs** run via the [Waydroid](https://waydroid.org) container
+(kernel Binder enabled in our custom kernel); with no container running,
+a connected phone gets the package via `adb install -r`.
+
+**Alpine `.apk`** packages (same format as Alpine/Adélie/postmarketOS) are
+installed by the official static `apk-tools` into `~/.deposit/alpine` — an
+isolated musl prefix that doesn't touch the Ubuntu base. Packages are
+signature-verified against Alpine keys; self-built files need
+`deposit-apk --insecure`. Apps run sandboxed under bubblewrap with your
+home, GPU, audio and display passed through.
+
+## Bluetooth audio
+
+AirPods, Galaxy Buds and other BT headsets work at full quality:
+`pulseaudio-module-bluetooth` provides the A2DP sink profile, so pairing
+from **Settings → Bluetooth** or the quick menu connects straight to
+high-fidelity audio instead of the handset profile.
+
 ## Package management quick reference
 
 ```bash
@@ -233,7 +269,7 @@ build/                 kernel + rootfs build scripts and config
   kernel-fragments/    deposit-broad.cfg, deposit-arm64.cfg, deposit-80m.cfg
 tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu,
                        deposit-settings, deposit-files, deposit-compat,
-                       deposit-win, deposit-winmode, deposit-av,
+                       deposit-win, deposit-winmode, deposit-apk, deposit-av,
                        deposit-turbo-fx, deposit-security, deposit-store,
                        deposit-updater, deposit-oobe, deposit-install
 ci/                    make-disk.sh, make-iso.sh, make-arm64-image.sh,

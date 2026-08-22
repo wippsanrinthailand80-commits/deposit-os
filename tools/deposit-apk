@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""deposit-apk — install ".apk" packages on Deposit OS.
+
+".apk" is TWO completely different formats; this tool sniffs and routes:
+
+  1. ANDROID APK   (zip containing AndroidManifest.xml)
+     -> Waydroid container if a session is up, else `adb install` to a
+        connected phone, else setup guidance.
+
+  2. ALPINE apk    (Alpine Package Keeper, signed tar.gz — same format as
+                    Alpine/Adélie/postmarketOS packages)
+     -> installed into an isolated user prefix (~/.deposit/alpine) with the
+        shipped static apk-tools; run apps via `deposit-apk run <pkg>`.
+
+Usage:
+  deposit-apk [--quiet] FILE.apk      install (auto-detect format)
+  deposit-apk --android FILE.apk      force the Android route
+  deposit-apk --alpine  FILE.apk      force the Alpine route
+  deposit-apk run NAME [args...]      run an app from the Alpine prefix
+  deposit-apk list                    list Alpine-prefix packages
+"""
+import os
+import subprocess
+import sys
+import zipfile
+
+ALPINE_PREFIX = os.path.expanduser("~/.deposit/alpine")
+APK_STATIC = "/usr/local/libexec/apk.static"
+ALP_BRANCH = "latest-stable"
+ALP_ARCH = {"x86_64": "x86_64", "aarch64": "aarch64", "armv7l": "armv7"}.get(
+    os.uname().machine, "x86_64")
+REPOS = [
+    f"https://dl-cdn.alpinelinux.org/alpine/{ALP_BRANCH}/main",
+    f"https://dl-cdn.alpinelinux.org/alpine/{ALP_BRANCH}/community",
+]
+
+
+def sh(cmd, **kw):
+    """argv-only runner."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=kw.pop("timeout", 300), **kw)
+    except Exception as e:
+        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+
+
+def sniff(path):
+    """'android' | 'alpine' — Android APK is a zip with AndroidManifest.xml."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            if any(n.endswith("AndroidManifest.xml") for n in z.namelist()):
+                return "android"
+    except zipfile.BadZipFile:
+        pass
+    return "alpine"
+
+
+# ----------------------------------------------------------------- android --
+def install_android(path):
+    out = sh(["waydroid", "session", "status"])
+    if out.returncode == 0:
+        print("[apk] Android route: installing into the Waydroid container…")
+        r = sh(["waydroid", "app", "install", path], timeout=600)
+        print(r.stdout or r.stderr)
+        sys.exit(r.returncode)
+    dev = sh(["adb", "devices"]).stdout.splitlines()
+    if any(d.endswith(("device", "recovery")) for d in dev[1:] if "\t" in d):
+        print("[apk] Android route: sideloading to the connected device via adb…")
+        r = sh(["adb", "install", "-r", path], timeout=600)
+        print(r.stdout or r.stderr)
+        sys.exit(r.returncode)
+    print("""[apk] No Android runtime found. Pick one:
+
+  • Run Android apps on this machine (Waydroid container):
+      sudo waydroid init && sudo systemctl start waydroid-container
+      then start "Waydroid" from the menu and retry.
+
+  • Or plug in an Android phone with USB debugging enabled (adb).""")
+    sys.exit(4)
+
+
+# ----------------------------------------------------------------- alpine ---
+def alpine_ready():
+    return os.path.isfile(APK_STATIC)
+
+
+def bootstrap_alpine():
+    os.makedirs(ALPINE_PREFIX, exist_ok=True)
+    base = [APK_STATIC, "--root", ALPINE_PREFIX,
+            "--repository", REPOS[0], "--repository", REPOS[1]]
+    print("[apk] one-time bootstrap of the Alpine prefix (keys + busybox)…")
+    # first add needs --allow-untrusted only to fetch the keyring itself;
+    # every later package is verified against those keys.
+    r = sh(base + ["--initdb", "--allow-untrusted", "add", "alpine-keys"], timeout=600)
+    if r.returncode != 0:
+        print(r.stdout or r.stderr)
+        sys.exit(5)
+    r2 = sh(base + ["add", "busybox"], timeout=600)
+    if r2.returncode != 0:
+        print(r2.stdout or r2.stderr)
+
+
+def install_alpine(path, insecure=False):
+    if not alpine_ready():
+        print(f"[apk] {APK_STATIC} missing — this image was built with "
+              "DEPOSIT_ALPINE_SUPPORT=0. Rebuild or: sudo apt install apk-tools.")
+        sys.exit(3)
+    if not os.path.isdir(os.path.join(ALPINE_PREFIX, "etc", "apk", "keys")):
+        bootstrap_alpine()
+    cmd = [APK_STATIC, "--root", ALPINE_PREFIX]
+    for rp in REPOS:
+        cmd += ["--repository", rp]
+    cmd += ["--allow-untrusted"] if insecure else []
+    cmd += ["add", os.path.abspath(path)]
+    print(f"[apk] Alpine route: installing {os.path.basename(path)} "
+          f"{'(--insecure: signature NOT checked!)' if insecure else '(signature-verified against Alpine keys)'}")
+    r = sh(cmd, timeout=900)
+    print(r.stdout or r.stderr)
+    if r.returncode != 0 and not insecure:
+        print("\nIf this file is self-built/unsigned you can skip verification:")
+        print(f"  deposit-apk --insecure {path}")
+    elif r.returncode == 0:
+        print(f"[apk] done. Run apps with:  deposit-apk run <binary>   "
+              f"(see: deposit-apk list)")
+    sys.exit(r.returncode)
+
+
+def run_alpine(argv):
+    root = ALPINE_PREFIX
+    bwrap = [
+        "bwrap",
+        "--ro-bind", root, "/",           # musl rootfs from the prefix
+        "--proc", "/proc", "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--bind", os.path.expanduser("~"), os.path.expanduser("~"),
+        "--dev-bind-try", "/dev/dri", "/dev/dri",
+        "--dev-bind-try", "/dev/snd", "/dev/snd",
+        "--ro-bind-try", "/tmp/.X11-unix", "/tmp/.X11-unix",
+        "--bind-try", os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+                     os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+        "--clearenv",
+        "--setenv", "HOME", os.path.expanduser("~"),
+        "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "--setenv", "LANG", os.environ.get("LANG", "C.UTF-8"),
+        "--setenv", "XDG_RUNTIME_DIR", os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+    ]
+    if os.environ.get("DISPLAY"):
+        bwrap += ["--setenv", "DISPLAY", os.environ["DISPLAY"]]
+    try:
+        os.execvp("bwrap", bwrap + argv)
+    except FileNotFoundError:
+        print("[apk] bubblewrap not installed — cannot sandbox Alpine apps.")
+        sys.exit(3)
+
+
+def list_alpine():
+    db = os.path.join(ALPINE_PREFIX, "lib/apk/db/installed")
+    if not os.path.isfile(db):
+        print("(alpine prefix empty — nothing installed yet)")
+        return
+    for line in open(db):
+        if line.startswith("P:"):
+            print(line[2:].strip())
+
+
+# --------------------------------------------------------------------- main --
+def main():
+    args = sys.argv[1:]
+    quiet = False
+    while args and args[0].startswith("--") and args[0] not in ("--help",):
+        f = args.pop(0)
+        if f == "--quiet":
+            quiet = True
+        elif f in ("--android", "--alpine", "--insecure"):
+            args.insert(0, f)          # keep for below
+            break
+        else:
+            break
+
+    if not args or args[0] == "--help":
+        print(__doc__)
+        return 0
+    cmd = args[0]
+
+    if cmd == "list":
+        list_alpine(); return 0
+    if cmd == "run":
+        if len(args) < 2:
+            print("usage: deposit-apk run BINARY [args…]"); return 2
+        run_alpine(args[1:]); return 0
+
+    force = None
+    insecure = False
+    rest = []
+    it = iter(args)
+    for a in it:
+        if a == "--android":
+            force = "android"
+        elif a == "--alpine":
+            force = "alpine"
+        elif a == "--insecure":
+            insecure = True
+        elif not rest:
+            rest.append(a)
+
+    if not rest:
+        print("usage: deposit-apk FILE.apk"); return 2
+    path = rest[0]
+    if not os.path.isfile(path):
+        print(f"[apk] file not found: {path}"); return 4
+
+    kind = force or sniff(path)
+    size = os.path.getsize(path)
+    print(f"[apk] {os.path.basename(path)} · {size/1048576:.1f} MB · detected: {kind}")
+    if kind == "android":
+        install_android(path)
+    return install_alpine(path, insecure=insecure)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
