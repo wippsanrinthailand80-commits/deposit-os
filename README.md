@@ -2,28 +2,40 @@
 
 **A Linux distribution built from the kernel up** — we compile our own Linux
 kernel from upstream source and assemble a minimal, apt-compatible userspace.
-Deposit OS runs standard Ubuntu/Debian `.deb` packages (via `apt`/`dpkg`) and
-adds its own packaging format (`.mlpds`) and installer (`aqa`).
+Deposit OS runs standard Ubuntu/Debian `.deb` packages (via `apt`/`dpkg`),
+runs Windows installers (`.exe`/`.msi`) through Wine, and adds its own
+packaging format (`.mlpds`) with the `aqa` installer.
 
-- **Own kernel**: Linux 6.6.58 (LTS), configured from `defconfig` plus
-  `build/kernel-fragments/deposit-broad.cfg`.
-- **Lean userspace**: `debootstrap` of Ubuntu 24.04 (Noble), glibc-based,
-  systemd init — ABI-compatible with the Debian/Ubuntu package pool.
-- **`.mlpds` packages + `aqa` installer**: fast, unified package management
+**Beta `0.1.0.8`** · Andromeda purple-blue theme · x86_64 **and** ARM64
+
+## Highlights
+
+- **Own kernel**: Linux 6.6.58 LTS compiled from kernel.org source —
+  `defconfig` + `deposit-broad.cfg` (distro-class driver set) +
+  `deposit-80m.cfg` (KVM/VFIO, RDMA, CAN, EROFS, ZRAM, Thunderbolt, tracing).
+- **Ubuntu-compatible userspace**: debootstrap of Ubuntu 24.04 (Noble),
+  glibc/systemd — ABI-compatible with the Debian/Ubuntu pool. A built-in
+  compat layer also runs **jammy (22.04)** and **focal (20.04)** binaries
+  (see [Ubuntu compatibility](#ubuntu-compatibility)).
+- **`.mlpds` packages + `aqa` installer**: fast unified package management
   with native `.mlpds` support and direct `.deb`/`apt` compatibility.
-- **Turbo mode**: one command flips the CPU/GPU into maximum-performance
-  (`performance` governor + GPU power profile) with a spinning/fade transition FX.
-- **Security**: AppArmor (in the kernel), ClamAV antivirus, and a firewall
-  (`ufw`) — surfaced in the quick menu. `.mlpds` packages are GPG-signed and
-  verified on install; `aqa` requires a sha256 for any web-sourced `.deb`, and
-  `deposit-install` refuses to wipe the disk the OS is currently running from.
-- **Samsung-style quick menu**: a floating, toggleable panel
-  (`Super+Q`) with Wi‑Fi, Airplane, Turbo, LAN toggles, Brightness **and
-  Volume** sliders, a Security section, and a **Settings** + **About** tile.
-- **Settings hub**: a simple Samsung One UI / Android-hybrid settings app
-  (gear icon) with Wi‑Fi/Airplane/Turbo toggles, Brightness/Volume sliders,
-  and one-tap access to Security, Updates and About.
-- **Thai language** support out of the box, plus a rounded, branded aesthetic.
+  `.mlpds` are GPG-signed and verified on install.
+- **Windows-friendly**: double-click a Windows installer and it just runs
+  (Wine, as your user); flip to a **Windows-style taskbar with a Start
+  button** any time; NTFS/exFAT drives read-write out of the box.
+- **Turbo mode**: one command flips CPU/GPU into maximum performance with a
+  spinning/fade transition FX.
+- **Samsung-style quick menu** (`Super+Q`): Wi‑Fi, Airplane, Turbo, LAN,
+  Brightness and Volume sliders, Security section, Settings + About tiles.
+- **Settings hub**: One UI-inspired settings app — now with a one-tap
+  **Windows Mode** row.
+- **Andromeda theme**: hand-drawn spiral-galaxy wallpaper (light/dark/
+  abstract alternates included), Materia-dark + Papirus-Dark, deep-purple
+  translucent panel, branded Plymouth splash.
+- **Security hardening**: AppArmor in the kernel, ClamAV, `ufw`, random root
+  password replaced at first login, typed confirmation before any disk wipe,
+  self-wipe protection for the installer, GPG verification for packages.
+- **Thai language** support out of the box (fonts + IBus input).
 
 ## Screenshots
 
@@ -37,14 +49,31 @@ adds its own packaging format (`.mlpds`) and installer (`aqa`).
 
 | Layer        | Choice |
 |--------------|--------|
-| Kernel       | Linux 6.6.58, built from kernel.org source (`build/build-kernel.sh`) |
+| Kernel       | Linux 6.6.58 from kernel.org source (`build/build-kernel.sh`, fragments in `build/kernel-fragments/`) |
 | C library    | glibc (via Ubuntu Noble debootstrap) |
 | Init system  | systemd |
 | Packaging    | `dpkg`/`apt` + Deposit `.mlpds` (`tools/mlpds`) |
 | Installer    | `aqa` (`tools/aqa`) |
-| Desktop      | XFCE4 + LightDM, autologin |
-| Live media   | GRUB2 + `live-boot` + SquashFS ISO (`ci/make-iso.sh`) |
-| Security     | AppArmor (kernel) · ClamAV · ufw |
+| Desktop      | XFCE4 + LightDM · Materia-dark / Papirus-Dark · Andromeda wallpaper |
+| Windows apps | Wine + winetricks (`tools/deposit-win`), layout via `tools/deposit-winmode` |
+| Live media   | GRUB2 + `live-boot` + SquashFS ISO (x86_64) · GPT/UEFI image (ARM64) |
+| Security     | AppArmor (kernel) · ClamAV · ufw · signed `.mlpds` |
+
+## Release channels
+
+Every successful CI run on `main` produces **both** channels from one
+pipeline — no branches, no forks:
+
+| Channel (`github release tag`) | Contents | Login behaviour |
+|---|---|---|
+| **`continuous`** | secure `deposit-os.iso`, `deposit.os.mlpds`, `deposit-arm64.img` | real login screen |
+| **`continuous-liveboot`** | convenience media: `deposit-os-live-autologin.iso`, `deposit-arm64-live-autologin.img` | auto-login straight to the desktop |
+
+The live-boot channel bakes autologin into the *media only*. On an installed
+system, `deposit-oobe` removes the drop-in once first-boot setup completes,
+so the audited login-screen default restores itself. The main channel is
+never affected: CI injects autologin only into throwaway copies for
+screenshots.
 
 ## Quick Start
 
@@ -54,19 +83,21 @@ Push to `main` (or open a PR). The CI pipeline:
 
 1. **mlpds tool + scripts + demo** — unit tests and a tool-demo screenshot.
 2. **build-kernel** — compiles the kernel (cached between runs).
-3. **build-rootfs** — debootstraps the userspace.
+3. **build-rootfs** — debootstraps the userspace (compat libs + Wine included).
 4. **package .mlpds + live boot** — packages the OS as `.mlpds`, boots it under
-   QEMU, captures screenshots, builds the **ISO**, and publishes a continuous
-   release.
+   QEMU, captures screenshots, builds **both ISOs**, and publishes both
+   rolling releases.
+5. **build + boot ARM64** *(gated: workflow_dispatch → `arm64=true`)* —
+   cross-compiles the ARM64 kernel, builds the ARM64 rootfs and UEFI image,
+   then smoke-boots it in QEMU (`virt` machine) with a screenshot.
 
-The bootable ISO is attached to the **continuous** GitHub Release and also
-uploaded as the `deposit-os.iso` workflow artifact.
+Artifacts land on the run; releases land on the two tags above.
 
 ### Build locally
 
 ```bash
-bash build/build-kernel.sh          # -> build/output/kernel
-bash build/build-rootfs.sh          # -> build/output/rootfs
+bash build/build-kernel.sh            # -> build/output/kernel
+bash build/build-rootfs.sh            # -> build/output/rootfs
 # Raw disk image (boots via QEMU -kernel):
 bash ci/make-disk.sh build/output/rootfs build/output/kernel build/output/deposit-disk.img 4096
 # Bootable ISO (BIOS + UEFI):
@@ -79,7 +110,19 @@ Boot the ISO:
 qemu-system-x86_64 -m 2048 -smp 2 -cpu max -cdrom build/output/deposit-os.iso -boot d
 ```
 
-## Install to a disk (USB)
+ARM64 build/cross-build:
+
+```bash
+DEPOSIT_ARCH=aarch64 bash build/build-kernel.sh     # cross-compiles
+DEPOSIT_ARCH=aarch64 bash build/build-rootfs.sh     # needs qemu-user-static
+bash ci/make-arm64-image.sh build/output/rootfs build/output/kernel \
+                             build/output/deposit-arm64.img 4096
+qemu-system-aarch64 -M virt -cpu max -m 2048 \
+  -drive file=build/output/deposit-arm64.img,if=virtio,format=raw \
+  -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+```
+
+## Install to a disk
 
 The ISO is a **live + installer** image. To put Deposit OS on real hardware:
 
@@ -88,18 +131,48 @@ The ISO is a **live + installer** image. To put Deposit OS on real hardware:
    sudo dd if=build/output/deposit-os.iso of=/dev/sdX bs=4M status=progress; sync
    ```
 2. Boot from the USB stick.
- 3. From the live desktop, double-click **Install Deposit OS** (or run
-    `sudo deposit-install /dev/sda` in a terminal). It will ask you to type
-    `yes` to confirm the disk wipe before proceeding. It GPT-partitions the disk
-    (ESP + ext4 root), copies the system, builds an initramfs, writes `/etc/fstab`
-    and installs GRUB for both BIOS and UEFI.
-4. Reboot into the installed disk.
+3. From the live desktop, double-click **Install Deposit OS** (or run
+   `deposit-install` in a terminal). It shows an interactive disk picker,
+   refuses to wipe the disk the OS is running from, and requires you to type
+   `yes` before touching anything. It GPT-partitions the target (ESP + ext4
+   root), copies the system, builds an initramfs, writes `/etc/fstab` and
+   installs GRUB for both BIOS and UEFI (existing OSes are detected via
+   os-prober).
+4. Reboot into the installed disk. On first login you set your own password
+   (the build ships a random one that is forced to change).
 
-## Releases
+## Ubuntu compatibility
 
-Each successful CI run publishes a rolling **continuous** GitHub Release that
-attaches the bootable `deposit-os.iso` and the `deposit.os.mlpds` package. The
-same artifacts are also uploaded to the workflow run.
+Deposit OS is Noble-based but ships the older sonames that jammy/focal
+binaries link against — alongside the newer ones, with no downgrades:
+
+```bash
+deposit-compat              # show pinning + which compat libs are present
+deposit-compat check ./app  # ldd a jammy/focal binary -> missing libs?
+sudo apt -t jammy install <pkg>   # ad-hoc install from an older suite
+```
+
+Implemented as apt pins (`900` noble / `100` jammy,focal) over arch-aware
+mirrors; only explicit compat libs are pulled (`libicu70`, `libssl1.1`,
+`libicu66`, `libffi7`). Disable with `DEPOSIT_ENABLE_COMPAT=0`.
+
+## Windows-friendly
+
+```bash
+deposit-win setup.exe       # run a Windows installer (Wine, as YOUR user)
+deposit-win --quiet app.msi # skip the confirmation dialog
+deposit-winmode on          # Windows-style taskbar + Start button
+deposit-winmode off         # back to the Deposit glass panel
+deposit-winmode toggle      # or tap "Windows Mode" in Settings
+```
+
+- Double-clicking an `.exe`/`.msi` in the file manager routes through
+  `deposit-win`: it prints the file's SHA256 + size, asks once, and never
+  runs as root.
+- `wine`, `winetricks` and the core Windows-metric fonts are preinstalled;
+  the Wine prefix lives in `~/.wine` (user-owned).
+- NTFS (kernel `ntfs3` + `ntfs-3g`) and exFAT drives mount read-write.
+- Lean build? `DEPOSIT_WIN_SUPPORT=0` drops the whole layer.
 
 ## Package management quick reference
 
@@ -120,42 +193,48 @@ aqa list                   # list installed packages
 
 | Resource     | Minimum | Recommended |
 |--------------|---------|-------------|
-| Architecture | x86_64 (amd64) | x86_64; ARM64 is *test-only, not yet supported* ([port plan #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1)) |
-| RAM          | 1 GB    | 2 GB+ |
-| Storage      | 8 GB    | 16 GB+ |
+| Architecture | x86_64 (amd64) | x86_64; ARM64 supported (UEFI — QEMU `virt`, Pi 4/5-class; see [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1)) |
+| RAM          | 1 GB    | 2 GB+ (4 GB with Wine apps) |
+| Storage      | 10 GB   | 16 GB+ |
 | Graphics     | VGA / any (boots headless too) | GPU with open drivers for Turbo |
 | Network      | optional | Ethernet or Wi‑Fi |
 
 ## Status & roadmap
 
-Deposit OS is functional and reproducibly built in CI, but is still maturing:
+Deposit OS is functional and reproducibly built in CI, but is still beta:
 
 - **Long-term stability** — not yet validated across a wide range of hardware.
+- **Wine layer** — packaging is validated in CI; GUI-app behaviour should be
+  play-tested per application (that's Wine).
 - **Update path** — OS updates today rely on `apt` + `aqa`; a unified,
   user-centric updater is planned.
-- **Hardware support** — the ~45 MB kernel aims for broad support but is not yet
-  extensively field-tested. **ARM64** is tracked in
+- **Kernel** — tuned up for broad coverage (~50 MB packaged artifact);
+  extensively field-testing is ongoing. ARM64 tracked in
   [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1).
-- **UI/UX polish** — the full feature set exists (quick menu, Settings hub, Turbo
-  FX); visual refinement continues.
-- **Docs & support** — a user manual and built-in troubleshooting tool are still
-  TODO.
+- **Docs & support** — a user manual and built-in troubleshooting tool are
+  still TODO.
 
 ## Project layout
 
 ```
 build/                 kernel + rootfs build scripts and config
-tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu, deposit-settings,
-                       deposit-files, deposit-av, deposit-turbo-fx, deposit-security,
-                       deposit-store, deposit-updater, deposit-oobe, deposit-install
-ci/                    make-disk.sh, make-iso.sh, live-boot.sh, demo + render helpers
+  kernel-fragments/    deposit-broad.cfg, deposit-arm64.cfg, deposit-80m.cfg
+tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu,
+                       deposit-settings, deposit-files, deposit-compat,
+                       deposit-win, deposit-winmode, deposit-av,
+                       deposit-turbo-fx, deposit-security, deposit-store,
+                       deposit-updater, deposit-oobe, deposit-install
+ci/                    make-disk.sh, make-iso.sh, make-arm64-image.sh,
+                       live-boot.sh, inject-autologin.sh, publish-release.sh,
+                       demo + render helpers
+assets/                logo, gear, wallpapers (andromeda/light/dark/abstract)
 docs/assets/           screenshots used in this README
 ```
 
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE). The OS bundles many upstream components
-(Linux kernel, glibc, XFCE, …) each under their own licenses.
+(Linux kernel, glibc, XFCE, Wine, …) each under their own licenses.
 
 ## Contributing
 
