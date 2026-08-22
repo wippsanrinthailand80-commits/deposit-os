@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# deposit-winmode — switch between the Deposit layout and a Windows-style
+# taskbar (Start button + window buttons + tray + clock) on XFCE.
+#
+# Usage: deposit-winmode [on|off|toggle|status]
+#   on      -> Windows-style taskbar (whiskermenu "Start")
+#   off     -> Deposit glass panel (default)
+#   toggle  -> flip between them
+#   status  -> show current mode
+#
+# Copies read-only templates from /usr/share/deposit/winmode into the user's
+# xfconf, then restarts xfce4-panel when running inside a session. Never root.
+set -u
+
+TPL="/usr/share/deposit/winmode"
+CONF_DIR="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+PANEL_DST="$CONF_DIR/xfce4-panel.xml"
+WMENU_RC="$HOME/.config/xfce4/panel/whiskermenu-1.rc"
+MARKER="$HOME/.config/deposit/winmode-mode"
+
+current_mode() {
+  if [[ -f "$MARKER" && "$(cat "$MARKER" 2>/dev/null)" == "windows" ]]; then
+    echo windows
+  else
+    echo deposit
+  fi
+}
+
+restart_panel() {
+  if command -v xfce4-panel >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+    pkill -f xfce4-panel 2>/dev/null || true
+    sleep 0.6
+    setsid xfce4-panel >/dev/null 2>&1 < /dev/null &
+    echo "[winmode] panel restarted"
+  else
+    echo "[winmode] not in a graphical session — log out and back in to apply."
+  fi
+}
+
+apply() {
+  local src="$1" mode_name="$2"
+  [[ -f "$TPL/$src" ]] || { echo "[winmode] missing template $TPL/$src" >&2; exit 3; }
+  if [[ "$(id -u)" == "0" ]]; then
+    echo "[winmode] refusing to run as root (this changes YOUR desktop only)." >&2
+    exit 1
+  fi
+  mkdir -p "$CONF_DIR" "$HOME/.config/deposit" "$HOME/.config/xfce4/panel"
+  # one-time safety backup of whatever the user had
+  if [[ -f "$PANEL_DST" && ! -f "$PANEL_DST.pre-winmode" ]]; then
+    cp -- "$PANEL_DST" "$PANEL_DST.pre-winmode"
+  fi
+  cp -- "$TPL/$src" "$PANEL_DST"
+  echo "$mode_name" > "$MARKER"
+  if [[ "$mode_name" == "windows" ]]; then
+    # Whisker menu: label the button "Start", keep config file tiny/harmless.
+    printf 'button-title=Start\nshow-button-title=true\n' > "$WMENU_RC"
+  fi
+  echo "[winmode] $mode_name layout applied ($PANEL_DST)"
+  restart_panel
+}
+
+case "${1:-status}" in
+  on)     apply windows-panel.xml windows ;;
+  off)    apply deposit-panel.xml deposit ;;
+  toggle)
+    if [[ "$(current_mode)" == "windows" ]]; then apply deposit-panel.xml deposit
+    else apply windows-panel.xml windows; fi ;;
+  status) echo "windows-mode: $(current_mode)" ;;
+  -h|--help|"") sed -n '2,13p' "$0"; exit 0 ;;
+  *) echo "usage: deposit-winmode [on|off|toggle|status]" >&2; exit 2 ;;
+esac

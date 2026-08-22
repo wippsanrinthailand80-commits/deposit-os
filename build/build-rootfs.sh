@@ -128,6 +128,7 @@ cat > "$ROOTFS/etc/update-motd.d/00-deposit-beta" <<MOTD
 #!/bin/sh
 echo ""
 echo "  ◆ Deposit OS Beta $DEPOSIT_VERSION — Andromeda (purple-blue) · x86_64 + arm64"
+echo "  ◆ Windows-friendly: double-click .exe/.msi (Wine) · 'deposit-winmode on' for the taskbar look"
 echo "  ◆ Kernel ~80MB • Ubuntu compat (jammy/focal) • Samsung One UI inspired"
 echo ""
 MOTD
@@ -285,6 +286,12 @@ if [ "$DEPOSIT_ENABLE_THAI" = "1" ]; then
   locale-gen || echo "WARN: locale-gen issue"
   update-locale LANG=$DEPOSIT_DEFAULT_LOCALE || true
 fi
+# Windows-friendly layer (Beta 0.1.0.8): Wine + winetricks + ntfs-3g.
+# Non-fatal: an unavailable package must not break the whole image build.
+if [ "$DEPOSIT_WIN_SUPPORT" = "1" ]; then
+  apt-get \$APT_OPTS install -y --no-install-recommends $DEPOSIT_WIN_PKGS \
+    || echo "WARN: windows-support install issue (wine/ntfs)"
+fi
 EOF
 chmod +x "$ROOTFS/tmp/deposit-extra.sh"
   chroot "$ROOTFS" /tmp/deposit-extra.sh
@@ -327,12 +334,28 @@ cp "$REPO_ROOT/tools/deposit-store"         "$ROOTFS/usr/local/bin/deposit-store
 cp "$REPO_ROOT/tools/deposit-oobe"          "$ROOTFS/usr/local/bin/deposit-oobe"
 cp "$REPO_ROOT/tools/deposit-settings"       "$ROOTFS/usr/local/bin/deposit-settings"
 cp "$REPO_ROOT/tools/deposit-compat"         "$ROOTFS/usr/local/bin/deposit-compat"
+cp "$REPO_ROOT/tools/deposit-win"            "$ROOTFS/usr/local/bin/deposit-win"
+cp "$REPO_ROOT/tools/deposit-winmode"        "$ROOTFS/usr/local/bin/deposit-winmode"
 chmod +x "$ROOTFS/usr/local/bin/deposit-quickmenu" "$ROOTFS/usr/local/bin/deposit-quickmenu-toggle" \
          "$ROOTFS/usr/local/bin/deposit-av" "$ROOTFS/usr/local/bin/deposit-turbo-fx" \
          "$ROOTFS/usr/local/bin/deposit-files" "$ROOTFS/usr/local/bin/deposit-install" \
          "$ROOTFS/usr/local/bin/deposit-security" "$ROOTFS/usr/local/bin/deposit-updater" \
          "$ROOTFS/usr/local/bin/deposit-store" "$ROOTFS/usr/local/bin/deposit-oobe" \
-         "$ROOTFS/usr/local/bin/deposit-settings" "$ROOTFS/usr/local/bin/deposit-compat"
+         "$ROOTFS/usr/local/bin/deposit-settings" "$ROOTFS/usr/local/bin/deposit-compat" \
+         "$ROOTFS/usr/local/bin/deposit-win" "$ROOTFS/usr/local/bin/deposit-winmode"
+
+# Windows installer handler: .exe / .msi open with deposit-win (Wine, as user).
+cat > "$ROOTFS/usr/share/applications/deposit-win-open.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Windows Installer (Deposit)
+Exec=deposit-win %f
+Terminal=false
+NoDisplay=true
+MimeType=application/vnd.microsoft.portable-executable;application/x-ms-dos-executable;application/x-msi;
+Categories=System;
+EOF
+chroot "$ROOTFS" update-desktop-database /usr/share/applications 2>/dev/null || true
 
 # Desktop entry for the file manager.
 mkdir -p "$ROOTFS/usr/share/applications"
@@ -519,6 +542,78 @@ position=50%,center 50%,center
 clock-format=%a, %d %b  %H:%M
 indicators=~host;~spacer;~clock;~spacer;~power
 GREETER
+
+# --- Windows-style mode templates (Beta 0.1.0.8, deposit-winmode) -----------
+# Two full xfce4-panel layouts shipped read-only; deposit-winmode copies the
+# chosen one into the user's xfconf and restarts the panel. No root needed
+# at runtime.
+mkdir -p "$ROOTFS/usr/share/deposit/winmode"
+cat > "$ROOTFS/usr/share/deposit/winmode/deposit-panel.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=8;x=960;y=1040"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="false"/>
+      <property name="size" type="uint" value="36"/>
+      <property name="background-style" type="uint" value="0"/>
+      <property name="background-color" type="array">
+        <value type="uint" value="18"/><value type="uint" value="14"/><value type="uint" value="42"/><value type="uint" value="235"/>
+      </property>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.07"/><value type="double" value="0.055"/><value type="double" value="0.165"/><value type="double" value="0.88"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/><value type="int" value="4"/>
+      </property>
+    </property>
+  </property>
+</channel>
+EOF
+cat > "$ROOTFS/usr/share/deposit/winmode/windows-panel.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=8;x=960;y=1059"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="42"/>
+      <property name="background-style" type="uint" value="0"/>
+      <property name="background-color" type="array">
+        <value type="uint" value="18"/><value type="uint" value="14"/><value type="uint" value="42"/><value type="uint" value="242"/>
+      </property>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.07"/><value type="double" value="0.055"/><value type="double" value="0.165"/><value type="double" value="0.95"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/><value type="int" value="4"/><value type="int" value="5"/>
+      </property>
+      <property name="plugins" type="empty">
+        <property name="plugin-1" type="string" value="whiskermenu">
+          <property name="button-title" type="string" value="Start"/>
+          <property name="button-icon" type="string" value="deposit-logo"/>
+        </property>
+        <property name="plugin-2" type="string" value="separator">
+          <property name="expand" type="bool" value="true"/>
+        </property>
+        <property name="plugin-3" type="string" value="tasklist">
+          <property name="grouping" type="uint" value="1"/>
+        </property>
+        <property name="plugin-4" type="string" value="systray">
+          <property name="show-frame" type="bool" value="false"/>
+        </property>
+        <property name="plugin-5" type="string" value="clock">
+          <property name="format" type="string" value="%a %H:%M   %d/%m"/>
+        </property>
+      </property>
+    </property>
+  </property>
+</channel>
+EOF
 
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
 # This is what makes "boot the OS" land on the Deposit OS desktop.

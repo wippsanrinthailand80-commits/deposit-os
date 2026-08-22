@@ -22,6 +22,7 @@ ICONS = {
     "display": "video-display",
     "sound": "audio-volume-high",
     "turbo": "drive-harddisk",
+    "windows": "computer",
     "security": "security-high",
     "updates": "system-software-update",
     "about": "dialog-information",
@@ -70,6 +71,16 @@ def set_airplane(on):
 def turbo_state():
     r = run(["cat", "/var/lib/deposit-turbo/state"])
     return (r.stdout.strip() if r and r.stdout.strip() else "off")
+
+
+def winmode_state():
+    """'windows' when the Windows-style taskbar layout is active."""
+    try:
+        marker = os.path.expanduser("~/.config/deposit/winmode-mode")
+        with open(marker) as f:
+            return f.read().strip()
+    except Exception:
+        return "deposit"
 
 
 def set_turbo(on):
@@ -253,6 +264,11 @@ class Settings(Gtk.Window):
         self._row(card, "turbo", "Turbo",
                   "Performance mode on" if turbo_state() == "on" else "Off",
                   control=self._switch(turbo_state() == "on", self._on_turbo))
+        # Windows Mode (taskbar + Start layout for Windows users)
+        self._row(card, "windows", "Windows Mode",
+                  "Taskbar + Start layout on" if winmode_state() == "windows"
+                  else "Deposit layout (tap to switch)",
+                  on_click=lambda: launch(["deposit-winmode", "toggle"]))
         # Tools
         self._row(card, "security", "Security", "Firewall, AV, AppArmor",
                   on_click=lambda: launch(["deposit-security"]))

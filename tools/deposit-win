@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# deposit-win — run a Windows installer (.exe / .msi) via Wine, as the user.
+#
+# Usage:
+#   deposit-win [--quiet] INSTALLER.exe
+#   deposit-win [--quiet] INSTALLER.msi
+#
+# Safety model:
+#   - NEVER runs as root (Wine prefixes must stay user-owned)
+#   - prints SHA256 + size before launch (transparency, not a gate)
+#   - asks for confirmation unless --quiet (GUI dialog when available)
+#   - argv-only execution; no shell interpolation of the path
+set -u
+
+QUIET=0
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --quiet|-q) QUIET=1 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    *) ARGS+=("$a") ;;
+  esac
+done
+
+if [[ ${#ARGS[@]} -lt 1 ]]; then
+  echo "usage: deposit-win [--quiet] INSTALLER.{exe,msi}" >&2
+  exit 2
+fi
+
+if [[ "$(id -u)" == "0" ]]; then
+  echo "deposit-win: refusing to run as root (Windows apps must be user-installed)." >&2
+  exit 1
+fi
+
+if ! command -v wine >/dev/null 2>&1; then
+  echo "deposit-win: wine is not installed." >&2
+  echo "  install it with:  sudo apt install wine wine64 winetricks" >&2
+  exit 3
+fi
+
+TARGET="${ARGS[0]}"
+if [[ ! -f "$TARGET" ]]; then
+  echo "deposit-win: file not found: $TARGET" >&2
+  exit 4
+fi
+ABS="$(readlink -f -- "$TARGET")"
+BASE="$(basename -- "$ABS")"
+
+case "$(strtolower() { tr 'A-Z' 'a-z' <<<"$1"; }; strtolower "$BASE")" in
+  *.msi) MODE="msi" ;;
+  *.exe) MODE="exe" ;;
+  *) echo "deposit-win: unsupported installer type: $BASE (want .exe or .msi)" >&2; exit 5 ;;
+esac
+
+echo "── Deposit OS · Windows installer ──────────────────────────"
+echo "  file : $BASE"
+echo "  size : $(du -h -- "$ABS" | cut -f1)"
+echo "  sha256: $(sha256sum -- "$ABS" | cut -d' ' -f1)"
+echo "  engine: wine ($(wine --version 2>/dev/null | head -1))"
+echo "  prefix: ${WINEPREFIX:-$HOME/.wine} (user-owned)"
+echo "────────────────────────────────────────────────────────────"
+
+if (( ! QUIET )); then
+  ANS=""
+  if command -v zenity >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+    zenity --question --title="Deposit OS" \
+      --text="Run this Windows installer?\n\n$BASE" >/dev/null 2>&1 || { echo "cancelled."; exit 6; }
+  else
+    read -r -p "Run this Windows installer? [y/N] " ANS
+    [[ "${ANS,,}" == "y" || "${ANS,,}" == "yes" ]] || { echo "cancelled."; exit 6; }
+  fi
+fi
+
+cd "$(dirname -- "$ABS")" || exit 7
+echo "[deposit-win] launching $BASE …"
+if [[ "$MODE" == "msi" ]]; then
+  exec wine msiexec /i "$(basename -- "$ABS")"
+else
+  exec wine "$(basename -- "$ABS")"
+fi
