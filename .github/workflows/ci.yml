@@ -400,26 +400,31 @@ jobs:
           cp "$IMG" "$BOOT"
           # CI-ONLY: enable autologin on a throwaway copy so the screenshot
           # reaches the desktop. The shipped image keeps a real login screen.
+          # --skip-oobe also silences the first-boot wizard on THIS copy so
+          # captures show the full desktop.
           DEV="$(sudo losetup -f --show --partscan "$BOOT")"
           MNT="$(mktemp -d)"
           sudo mount "${DEV}p2" "$MNT"
-          sudo bash ci/inject-autologin.sh "$MNT" deposit
+          sudo bash ci/inject-autologin.sh "$MNT" deposit --skip-oobe
           sudo umount "$MNT"; rmdir "$MNT"; sudo losetup -d "$DEV"
           qemu-system-aarch64 -M virt -cpu max -m 2048 -smp 2 \
             -drive file="$BOOT",if=virtio,format=raw \
             -bios "$BIOS" -vnc :2 -qmp tcp:127.0.0.1:4446,server,nowait -daemonize
-          sleep 150
+          sleep 180
           python3 ci/qmp_screendump.py /tmp/arm64-boot.png 127.0.0.1 4446 || true
+          sleep 30
+          python3 ci/qmp_screendump.py /tmp/arm64-boot-desktop.png 127.0.0.1 4446 || true
           pkill -f qemu-system-aarch64 || true
-          ls -l /tmp/arm64-boot.png 2>/dev/null || echo "no boot png"
+          ls -l /tmp/arm64-boot*.png 2>/dev/null || echo "no boot png"
       - name: publish ARM64 boot to summary
         if: always()
         run: |
-          if [ -s /tmp/arm64-boot.png ]; then
-            echo "### Deposit OS — ARM64 UEFI boot (QEMU virt)" >> "$GITHUB_STEP_SUMMARY"
+          for f in /tmp/arm64-boot.png /tmp/arm64-boot-desktop.png; do
+            [ -s "$f" ] || continue
+            echo "### Deposit OS — ARM64 UEFI boot ($(basename "$f"))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "![arm64 boot](data:image/png;base64,$(base64 -w0 /tmp/arm64-boot.png))" >> "$GITHUB_STEP_SUMMARY"
-          fi
+            echo "![arm64 $(basename "$f")](data:image/png;base64,$(base64 -w0 "$f"))" >> "$GITHUB_STEP_SUMMARY"
+          done
       - name: report failure
         if: failure()
         env:

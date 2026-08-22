@@ -18,10 +18,12 @@ bash ci/make-disk.sh "$ROOTFS" "$KERNEL" "$OUT" 4096
 
 # CI-ONLY: enable autologin on a throwaway copy of the disk so the screenshot
 # reaches the desktop. The shipped .mlpds installer keeps a real login screen.
+# --skip-oobe also pre-sets the OOBE sentinel on THIS copy only, so captures
+# show the full desktop instead of the first-boot setup wizard.
 echo "[live] injecting CI autologin into disk image"
 MNT="$(mktemp -d)"
 sudo mount -o loop "$OUT" "$MNT"
-sudo bash ci/inject-autologin.sh "$MNT" deposit
+sudo bash ci/inject-autologin.sh "$MNT" deposit --skip-oobe
 sudo umount "$MNT"; rmdir "$MNT"
 
 VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
