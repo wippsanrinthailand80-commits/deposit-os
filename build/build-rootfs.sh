@@ -829,6 +829,16 @@ cat > "$ROOTFS/etc/deposit/pkg-hash-whitelist" <<'EOF'
 # 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  hello-2.12.rpm
 EOF
 
+# Alpine .apk policy — gates deposit-apk --insecure (signature bypass).
+cat > "$ROOTFS/etc/deposit/apk.conf" <<EOF
+# deposit-apk policy — user override: ~/.config/deposit/apk.conf
+# ALLOW_INSECURE controls 'deposit-apk --insecure' (skips signature checks):
+#   ask    = interactive confirmation required (type ALLOW); scripts refused
+#   always = allowed without prompt (for CI/scripted builds)
+#   never  = --insecure refused entirely
+ALLOW_INSECURE="ask"
+EOF
+
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
 # This is what makes "boot the OS" land on the Deposit OS desktop.
 chroot "$ROOTFS" /bin/bash -c '

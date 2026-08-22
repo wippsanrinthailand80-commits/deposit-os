@@ -35,6 +35,51 @@ REPOS = [
     f"https://dl-cdn.alpinelinux.org/alpine/{ALP_BRANCH}/community",
 ]
 
+# --insecure gate: ALLOW_INSECURE in /etc/deposit/apk.conf (or
+# ~/.config/deposit/apk.conf) — ask (default) | always | never.
+# "ask" requires an interactive confirmation typing ALLOW; scripted/CI use
+# must set ALLOW_INSECURE=always explicitly. Default keeps signatures on.
+ALLOW_INSECURE = "ask"
+for _cf in ("/etc/deposit/apk.conf", os.path.expanduser("~/.config/deposit/apk.conf")):
+    try:
+        for _ln in open(_cf, errors="replace"):
+            _ln = _ln.strip()
+            if _ln.startswith("ALLOW_INSECURE="):
+                ALLOW_INSECURE = _ln.split("=", 1)[1].strip().strip('"').lower()
+    except OSError:
+        pass
+
+
+def insecure_gate(path):
+    """Return True when an --insecure install may proceed."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+    if ALLOW_INSECURE == "never":
+        print("[apk] REFUSED: --insecure disabled by apk.conf (ALLOW_INSECURE=never).")
+        print("      Sign the package or install it into a repository instead.")
+        return False
+    if ALLOW_INSECURE == "always":
+        print(f"[apk] WARNING: untrusted install allowed by config "
+              f"(sha256 {digest})")
+        return True
+    # default: ask — interactive confirmation only
+    if not sys.stdin.isatty():
+        print("[apk] REFUSED: --insecure needs interactive confirmation "
+              "(or ALLOW_INSECURE=always in ~/.config/deposit/apk.conf).")
+        return False
+    print(f"[apk] sha256: {digest}")
+    print("[apk] This package is NOT signature-verified. Verify the hash "
+          "out-of-band,\n      then type ALLOW to continue (anything else "
+          "aborts): ")
+    try:
+        return input().strip().upper() == "ALLOW"
+    except EOFError:
+        return False
+
 
 def sh(cmd, **kw):
     """argv-only runner."""
@@ -126,10 +171,14 @@ def bootstrap_alpine():
 
 
 def install_alpine(path, insecure=False):
+    if insecure and not insecure_gate(path):
+        sys.exit(8)
     if not alpine_ready():
         print(f"[apk] {APK_STATIC} missing — this image was built with "
               "DEPOSIT_ALPINE_SUPPORT=0. Rebuild or: sudo apt install apk-tools.")
         sys.exit(3)
+    if insecure and not insecure_gate(path):
+        sys.exit(8)
     if not os.path.isdir(os.path.join(ALPINE_PREFIX, "etc", "apk", "keys")):
         bootstrap_alpine()
     cmd = [APK_STATIC, "--root", ALPINE_PREFIX]
@@ -144,6 +193,7 @@ def install_alpine(path, insecure=False):
     if r.returncode != 0 and not insecure:
         print("\nIf this file is self-built/unsigned you can skip verification:")
         print(f"  deposit-apk --insecure {path}")
+        print("  (confirmation required — see /etc/deposit/apk.conf)")
     elif r.returncode == 0:
         print(f"[apk] done. Run apps with:  deposit-apk run <binary>   "
               f"(see: deposit-apk list)")
@@ -235,6 +285,8 @@ def main():
         print(f"[apk] file not found: {path}"); return 4
 
     kind = force or sniff(path)
+    if kind == "alpine" and insecure:
+        pass  # gated inside install_alpine
     size = os.path.getsize(path)
     print(f"[apk] {os.path.basename(path)} · {size/1048576:.1f} MB · detected: {kind}")
     if kind == "android":

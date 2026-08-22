@@ -9,6 +9,7 @@
 #                              .apk   (Android)  via Waydroid/adb
 #                              .apk   (Alpine)   apk-tools, signature-checked
 #                              .exe/.msi (Wine)  routed through deposit-win
+#                              .rpm/.pkg.tar.zst routed through deposit-pkg
 #                            e.g.  aqa install http://example.com/builds/
 #   aqa install <app|turbo>   install a known app (chrome, stream) or the
 #                             optional turbo GUI applet (aqa install turbo)
@@ -26,7 +27,7 @@
 #   --no-verify    ONLY for curated apps (chrome/stream/turbo): install without
 #                  a registered checksum. It does NOT bypass the mandatory
 #                  checksum requirement for arbitrary web .deb files.
-#   --type deb|mlpds|apk|exe|msi   restrict the scan to one file type
+#   --type deb|mlpds|apk|exe|msi|rpm   restrict the scan to one file type
 #
 # Security (per type, arbitrary web sources):
 #   * .deb        checksum MANDATORY (#sha256= fragment or 2nd argument);
@@ -36,6 +37,8 @@
 #                 by apk-tools, Android ones install into the Waydroid sandbox.
 #   * .exe/.msi   downloaded, then executed under deposit-win's own policy —
 #                 pass #sha256=<hash> to pre-approve (--expect) or whitelist.
+#   * .rpm/.pkg.tar.zst handed to deposit-pkg: HASH_POLICY=block refuses any
+#                 hash not whitelisted; pass #sha256=<hash> to pre-approve.
 # ============================================================================
 set -uo pipefail
 
@@ -172,22 +175,49 @@ try_install_deb(){
   return 1
 }
 
+# .rpm/.pkg.tar.zst — via deposit-pkg (its sha256 allowlist policy governs).
+install_pkg_file(){
+  local url="$1" f="$2" expect="${3:-}" got frag
+  frag="${url##*#}"; [[ "$frag" == "$url" ]] && frag=""
+  [[ -z "$expect" && "$frag" == sha256=* ]] && expect="${frag#sha256=}"
+  got="$(sha256sum "$f" | cut -d' ' -f1)"
+  if (( DRYRUN )); then log "[dry-run] would run deposit-pkg on: $f (sha256 $got)"; return 0; fi
+  command -v deposit-pkg >/dev/null 2>&1 || die "deposit-pkg not found in PATH"
+  if [[ -n "$expect" ]]; then
+    if [[ "${expect,,}" != "$got" ]]; then
+      log "refusing $url: checksum mismatch (expected $expect, got $got)"; return 1
+    fi
+    log "checksum verified for $url"
+    deposit-pkg "--expect=$got" "$f"
+    return $?
+  fi
+  log "handing to deposit-pkg (sha256 $got) — its whitelist policy governs install"
+  deposit-pkg "$f"
+}
+
 # --- dispatch one downloaded file by extension ------------------------------
 install_scanned(){
   # NOTE: don't merge these locals — ${f##*.} must run AFTER f is assigned
   # (all words of a single `local` expand before any of them are set).
   local url="$1" f="$2" expect="${3:-}"
+  case "${f##*/}" in
+    *.pkg.tar.zst) install_pkg_file "$url" "$f" "$expect"; return 0 ;;
+  esac
   local ext="${f##*.}"
   case "${ext,,}" in
     deb)   try_install_deb "$url" "$f" 0 "$expect" ;;
     mlpds) install_mlpds "$f" ;;
     apk)   install_apk_file "$f" ;;
     exe|msi) install_win_file "$url" "$f" "$expect" ;;
+    rpm)   install_pkg_file "$url" "$f" "$expect" ;;
     *) log "skipping unsupported type: .$ext" ;;
   esac
 }
 
-type_of(){ case "${1##*.}" in deb|mlpds|apk|exe|msi) echo "${1##*.}";; *) echo "?";; esac; }
+type_of(){
+  case "${1##*/}" in *.pkg.tar.zst) echo "pkg"; return 0;; esac
+  case "${1##*.}" in deb|mlpds|apk|exe|msi|rpm) echo "${1##*.}";; *) echo "?";; esac
+}
 
 # --- scan a URL for ALL supported package types ------------------------------
 # If the URL is itself a supported file, download it directly. Otherwise treat
@@ -197,7 +227,7 @@ scan_url(){
   local url="$1" expect="${2:-}" html links tmp f path tail
   path="${url%%[?#]*}"; tail="$(basename "$path")"
   case "${tail,,}" in
-    *.deb|*.mlpds|*.apk|*.exe|*.msi)
+    *.deb|*.mlpds|*.apk|*.exe|*.msi|*.rpm|*.pkg.tar.zst)
       log "direct file link detected: $url"
       tmp="$(mktemp -d)"; trap "rm -rf '$tmp'" EXIT
       f="$tmp/$tail"
@@ -206,10 +236,10 @@ scan_url(){
       return 0
       ;;
   esac
-  log "scanning $url for .deb/.mlpds/.apk/.exe/.msi …"
+  log "scanning $url for .deb/.mlpds/.apk/.exe/.msi/.rpm/.pkg.tar.zst …"
   html="$(fetch "$url")" || die "could not fetch $url"
   links="$(echo "$html" \
-     | grep -oE 'href="[^"]+\.(deb|mlpds|apk|exe|msi)"|href='"'"'[^'"'"']+\.(deb|mlpds|apk|exe|msi)'"'"'' \
+     | grep -oE 'href="[^"]+\.(deb|mlpds|apk|exe|msi|rpm|pkg\.tar\.zst)"|href='"'"'[^'"'"']+\.(deb|mlpds|apk|exe|msi|rpm|pkg\.tar\.zst)'"'"'' \
      | sed -E "s/href=[\"']([^\"']+)[\"']/\1/" | sort -u)"
   [[ -z "$links" ]] && { log "no supported package links found at $url"; return 0; }
 

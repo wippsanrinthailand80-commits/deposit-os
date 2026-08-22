@@ -19,7 +19,7 @@ Security model (mirrors tools/deposit-win):
     Filesystem exposure limited to: /home, X11, DRI GPU, audio, runtime dir.
 
 Usage:
-  deposit-pkg [--insecure] FILE.rpm | FILE.pkg.tar.zst [...]
+  deposit-pkg [--insecure] [--expect=SHA256] FILE.rpm | FILE.pkg.tar.zst [...]
   deposit-pkg run {rpm|arch} CMD [args...]
   deposit-pkg allow FILE            append this file's sha256 to user whitelist
   deposit-pkg list
@@ -213,8 +213,10 @@ def bwrap_lite(pre, argv, ld):
 
 
 # ------------------------------------------------------------------- main ---
-def install(paths, insecure=False):
+def install(paths, insecure=False, expect=""):
     rc = 0
+    if not expect:
+        expect = os.environ.get("DEPOSIT_PKG_EXPECT_SHA256", "").lower()
     for p in paths:
         k = kind_of(p)
         if not k:
@@ -228,6 +230,12 @@ def install(paths, insecure=False):
         print(f"[pkg] sha256: {h}")
         if insecure:
             print("[pkg] WARNING: --insecure skips the allowlist for THIS file")
+        elif expect and h != expect.lower():
+            print(f"[pkg] REFUSED: --expect hash mismatch.\n"
+                  f"  expected: {expect}\n  got:      {h}")
+            rc = 9; continue
+        elif expect and h == expect.lower():
+            print("[pkg] sha256 matches caller-supplied --expect ✓")
         elif hash_allowed(h):
             print("[pkg] sha256 whitelisted ✓")
         elif HASH_POLICY == "block":
@@ -327,13 +335,16 @@ def main(argv):
             print("usage: deposit-pkg run {rpm|arch} CMD [args…]"); return 2
         return run_cmd(argv[1], argv[2:])
     insecure = False
+    expect = ""
     files = []
     for a in argv:
         if a == "--insecure":
             insecure = True
+        elif a.startswith("--expect="):
+            expect = a.split("=", 1)[1].strip().lower()
         elif not a.startswith("--"):
             files.append(a)
-    return install(files, insecure=insecure)
+    return install(files, insecure=insecure, expect=expect)
 
 
 if __name__ == "__main__":

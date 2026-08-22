@@ -212,8 +212,11 @@ a connected phone gets the package via `adb install -r`.
 installed by the official static `apk-tools` into `~/.deposit/alpine` — an
 isolated musl prefix that doesn't touch the Ubuntu base. Packages are
 signature-verified against Alpine keys; self-built files need
-`deposit-apk --insecure`. Apps run sandboxed under bubblewrap with your
-home, GPU, audio and display passed through.
+`deposit-apk --insecure`, which is **gated**: `ALLOW_INSECURE=ask` (default)
+requires typing ALLOW at an interactive prompt after checking the sha256,
+`always`/`never` in `/etc/deposit/apk.conf` allow or forbid it outright.
+Apps run sandboxed under bubblewrap with your home, GPU, audio and display
+passed through.
 
 ## Bluetooth audio
 
@@ -278,11 +281,30 @@ Per-type verification for arbitrary web sources:
             the Waydroid sandbox
   .exe/.msi handed to deposit-win — pass #sha256=<hash> to pre-approve or
             whitelist the hash (HASH_POLICY=block governs)
+  .rpm/.pkg.tar.zst handed to deposit-pkg — HASH_POLICY=block refuses any
+            hash not whitelisted; #sha256=<hash> pre-approves (--expect)
 aqa install chrome         # curated app: installs on its registered sha256, or
 aqa install steam          # with --no-verify when no checksum is registered
 aqa install turbo          # (trusted source only)
 aqa list                   # list installed packages
 ```
+
+## Trust model — residual risks (read before whitelisting)
+
+Every installer path ends in one of: GPG signature (.mlpds, Alpine .apk),
+mandatory checksum (.deb), or SHA256 allowlists (.exe/.msi, .rpm/.pkg.tar.zst
+via deposit-pkg). What the allowlist model *cannot* protect against:
+
+- **Social engineering** — "verifying" a hash by copying it from the same
+  untrusted page that served the file proves nothing. Check it against the
+  vendor's HTTPS site or a second channel before whitelisting.
+- **The container/device boundary** — Android APKs run inside Waydroid; a
+  malicious app is constrained by Android's own sandbox, not by deposit-apk,
+  and `adb` trusts whatever device is plugged in. Audit installed Android
+  apps as you would on any Android device.
+- **Prefix code** — `deposit-pkg run` executes foreign binaries inside
+  bubblewrap, but anything you whitelist *does* run with your user
+  privileges. Whitelist deliberately.
 
 ## Specifications (measured on Beta 0.1.1)
 

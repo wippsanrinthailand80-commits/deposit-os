@@ -32,7 +32,7 @@ anti-vaporware contract: every claim here is checked against the tree.
 | 2 | ARM64 is build/QEMU-proven, not laptop-proven | needs hardware | Pi5-UEFI + Snapdragon-X bring-up checklist |
 | 3 | Updater still apt-centric UX | code (medium) | Updater v2 spec (below) |
 | 4 | No A/B / atomic updates | design decision | btrfs-snapshot proposal (below) |
-| 5 | Alpine prefix less hardened than deposit-win | code (small) | add `/etc/deposit/apk.conf` HASH_POLICY mirror of win.conf |
+| 5 | Alpine prefix less hardened than deposit-win | ✅ done | `--insecure` now gated by `/etc/deposit/apk.conf` (`ALLOW_INSECURE=ask/always/never`, default ask = interactive ALLOW confirmation); `.rpm`/`.pkg.tar.zst` got the full win.conf model (HASH_POLICY allowlist + traversal-safe extraction + bwrap) and AQA scans them with `--expect` pre-approval |
 | 6 | Waydroid session friction | ✅ improved 0.1.1 | container auto-start via pkexec in `deposit-apk` |
 | 7 | UI polish below commercial distros | ongoing | compositing ON now; animation/icon pass tracked below |
 | 8 | No Thai manual for general users | docs | ✅ `docs/MANUAL_TH.md` shipped with 0.1.1 |
