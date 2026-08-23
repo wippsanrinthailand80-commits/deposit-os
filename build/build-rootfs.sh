@@ -671,9 +671,16 @@ for wp in wallpaper-andromeda.svg wallpaper-light.svg wallpaper-dark.svg wallpap
 done
 # Also install as pixmaps for greeter fallback (Andromeda is the hero art)
 cp "$REPO_ROOT/assets/wallpaper-andromeda.svg" "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" 2>/dev/null || true
-# Pre-render the hero wallpaper to PNG for the login screen. lightdm-gtk-
-# greeter loads its background via gdk-pixbuf and CRASHES on SVG when
-# librsvg's loader isn't installed — so we rasterize at build time.
+# THE hero wallpaper: real Andromeda galaxy photograph (Adam Evans, CC BY 2.0
+# — see assets/ATTRIBUTIONS.md). Used by both the login screen and the XFCE
+# desktop via system-wide xfconf defaults below.
+HERO_JPG="/usr/share/backgrounds/deposit/andromeda-galaxy.jpg"
+if [[ -f "$REPO_ROOT/assets/wallpaper-andromeda-galaxy.jpg" ]]; then
+  cp "$REPO_ROOT/assets/wallpaper-andromeda-galaxy.jpg" "$ROOTFS$HERO_JPG"
+fi
+# Pre-render the vector wallpaper to PNG as fallback. lightdm-gtk-greeter
+# loads images via gdk-pixbuf and CRASHES on SVG when librsvg's loader isn't
+# installed — so we rasterize at build time instead of shipping raw SVG.
 if command -v rsvg-convert >/dev/null 2>&1 && [[ -f "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" ]]; then
   rsvg-convert -w 1920 -h 1080 -b '#0b1020' \
     "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" \
@@ -688,10 +695,11 @@ if [[ -f "$REPO_ROOT/assets/logo.svg" ]]; then
 fi
 mkdir -p "$ROOTFS/etc/initramfs-tools/conf.d"
 echo "FRAMEBUFFER=y" > "$ROOTFS/etc/initramfs-tools/conf.d/splash"
-# LightDM greeter (dark Andromeda-toned login, rounded greeter)
-# Background: pre-rendered Andromeda PNG when available (see above), else the
-# solid deep-space color. Themes: Breeze ships via breeze-gtk-theme.
-GREETER_BG="/usr/share/backgrounds/deposit/wallpaper-andromeda.png"
+# LightDM greeter (Andromeda galaxy login, Breeze-Dark, centered)
+# Background: the real galaxy photo when shipped, else pre-rendered vector
+# PNG, else the solid deep-space color. Never a raw SVG (see note above).
+GREETER_BG="/usr/share/backgrounds/deposit/andromeda-galaxy.jpg"
+[[ -f "$ROOTFS$GREETER_BG" ]] || GREETER_BG="/usr/share/backgrounds/deposit/wallpaper-andromeda.png"
 [[ -f "$ROOTFS$GREETER_BG" ]] || GREETER_BG="#0b1020"
 mkdir -p "$ROOTFS/etc/lightdm"
 cat > "$ROOTFS/etc/lightdm/lightdm-gtk-greeter.conf" <<GREETER
@@ -708,7 +716,36 @@ GREETER
 # NOTE: background is a pre-rendered PNG on purpose (never an SVG).
 # lightdm-gtk-greeter loads images via gdk-pixbuf; pointing it at an SVG
 # crashed greeters on installs where librsvg's loader wasn't pulled in.
-# The XFCE desktop still uses the full Andromeda SVG wallpaper.
+# The XFCE desktop uses the same galaxy photo via xfconf defaults below.
+
+# System-wide XFCE desktop wallpaper for EVERY new user: the Andromeda
+# galaxy photo, zoomed. Without this, fresh accounts get the stock XFCE
+# backdrop instead of our brand.
+mkdir -p "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
+cat > "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<XFD
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="single-workspace-number" type="int" value="0">
+      <property name="last-image" type="string" value="$HERO_JPG"/>
+      <property name="image-style" type="int" value="5"/>
+    </property>
+    <property name="screen0" type="empty">
+      <property name="monitor0" type="empty">
+        <property name="image-style" type="int" value="5"/>
+        <property name="last-image" type="string" value="$HERO_JPG"/>
+      </property>
+    </property>
+  </property>
+</channel>
+XFD
+
+# Plymouth watermark: rasterize the galaxy logo properly (the old build
+# copied raw SVG bytes into a .png filename, which plymouth can't render).
+if command -v rsvg-convert >/dev/null 2>&1 && [[ -f "$ROOTFS/usr/share/pixmaps/deposit-logo.svg" ]]; then
+  rsvg-convert -w 256 -h 256 "$ROOTFS/usr/share/pixmaps/deposit-logo.svg" \
+    -o "$ROOTFS/usr/share/plymouth/themes/spinner/watermark.png" || true
+fi
 
 # --- Windows-style mode templates (Beta 0.1.0.8, deposit-winmode) -----------
 # Two full xfce4-panel layouts shipped read-only; deposit-winmode copies the
