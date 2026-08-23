@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================================
-# live-boot.sh — boot the built Deposit OS under QEMU and capture screenshots
-# of the boot screen, the GUI, and a terminal running the AQA installer.
+# live-boot.sh — boot the built Deposit OS under QEMU twice and capture:
+#   boot #1: the LOGIN PAGE (Andromeda-themed lightdm greeter, no autologin)
+#   boot #2: the DESKTOP (autologin) + Firefox opening YouTube and Thai
+#            Wikipedia to prove web stack + Thai font rendering.
 #
-# Requires: qemu-system-x86_64, python3, and artifacts deposit-kernel /
+# Every frame comes from TWO independent sources: QMP screendumps (QEMU-side,
+# can be blank on some QEMU builds) and the in-guest /dev/fb0 "truth camera"
+# written by probes into /var/log, harvested after a clean ACPI powerdown.
+#
+# Requires: qemu-system-x86_64, python3-pil, and artifacts deposit-kernel /
 # deposit-rootfs already extracted into build/output.
 # ============================================================================
 set -euo pipefail
@@ -13,25 +19,119 @@ KERNEL="$REPO/build/output/kernel"
 ROOTFS="$REPO/build/output/rootfs"
 OUT="$REPO/build/output/deposit-disk.img"
 
+mkdir -p /tmp/shots
+
+VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
+[[ -n "$VMLINUZ" ]] || { echo "[live] no vmlinuz found"; exit 1; }
+
+launch_qemu() {
+  echo "[live] launching QEMU (TCG, VNC :0, QMP 4444, serial -> /tmp/serial.log)"
+  : > /tmp/serial.log
+  qemu-system-x86_64 \
+    -name "Deposit OS" \
+    -m 3072 -smp 2 -cpu max \
+    -kernel "$VMLINUZ" \
+    -append "root=/dev/sda rw rootfstype=ext4 console=tty0 console=ttyS0,115200n8 consoleblank=0" \
+    -drive file="$OUT",format=raw,if=ide \
+    -netdev user,id=n0 -device e1000,netdev=n0 \
+    -vga std \
+    -vnc :0 \
+    -serial file:/tmp/serial.log \
+    -qmp tcp:127.0.0.1:4444,server,nowait \
+    -daemonize
+}
+
+capture_series() { # <prefix> <t1> [t2] ...
+  local prefix="$1"; shift
+  local prev=0 t i=1
+  for t in "$@"; do
+    sleep $((t - prev))
+    prev=$t
+    python3 ci/qmp_screendump.py "/tmp/shots/$prefix-$i.png" 127.0.0.1 4444 --vnc-poke 5900 || \
+      echo "[live] screendump $prefix-$i failed (vm may still be booting)"
+    cp /tmp/serial.log "/tmp/shots/serial-up-to-${prefix}-${t}s.log" 2>/dev/null || true
+    echo "[live] captured $prefix-$i.png at ${t}s"
+    i=$((i + 1))
+  done
+}
+
+powerdown_and_wait() {
+  echo "[live] sending ACPI powerdown"
+  python3 ci/qmp_cmd.py 127.0.0.1 4444 system_powerdown >/dev/null 2>&1 || true
+  local i
+  for i in $(seq 1 30); do
+    pgrep -f qemu-system-x86_64 >/dev/null || break
+    sleep 2
+  done
+  pgrep -f qemu-system-x86_64 >/dev/null && { echo "[live] qemu still up — killing"; pkill -f qemu-system-x86_64 || true; sleep 3; }
+  sleep 2
+}
+
+mount_rw() {
+  MNT_RW="$(mktemp -d)"
+  sudo mount -o loop "$OUT" "$MNT_RW"
+}
+
+enable_unit() { # <service-name>
+  sudo mkdir -p "$MNT_RW/etc/systemd/system/graphical.target.wants"
+  sudo ln -sf "/etc/systemd/system/$1" "$MNT_RW/etc/systemd/system/graphical.target.wants/$1"
+}
+
+convert_fb0() { # <ppm-in-tmp> <png-out>
+  python3 - "$1" "$2" <<'PYC' || echo "[live] WARNING: fb0 conversion failed (non-fatal): $1 -> $2"
+import sys
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+src, dst = sys.argv[1], sys.argv[2]
+try:
+    im = Image.open(src)
+    im.save(dst)
+    print(f"[live] fb0 frame: {im.size} -> {dst}")
+except Exception as e:
+    print(f"[live] fb0 convert failed ({src}):", e)
+PYC
+}
+
+harvest_probes() {
+  echo "[live] harvesting probe outputs from image"
+  local MNT2 LOOP f
+  MNT2="$(mktemp -d)"
+  LOOP="$(sudo losetup -f --show -r "$OUT" 2>/dev/null)" || LOOP=""
+  if [[ -n "$LOOP" ]] && sudo mount -o ro,norecovery "$LOOP" "$MNT2"; then
+    for f in deposit-metrics.txt deposit-gfxdiag.txt; do
+      if sudo test -s "$MNT2/var/log/$f"; then
+        sudo cp "$MNT2/var/log/$f" "/tmp/$f"
+        sudo chown "$(id -u):$(id -g)" "/tmp/$f"
+        echo "[live] harvested $f ✓"
+      else
+        echo "[live] WARNING: /var/log/$f missing or empty inside image"
+      fi
+    done
+    # fb0 truth-camera frames (per-phase PPMs written by deposit-shot@)
+    for ppm in $(sudo ls "$MNT2/var/log/" 2>/dev/null | grep '^deposit-fb0.*\.ppm$' || true); do
+      sudo cp "$MNT2/var/log/$ppm" "/tmp/$ppm"
+      sudo chown "$(id -u):$(id -g)" "/tmp/$ppm"
+      echo "[live] harvested $ppm ✓"
+    done
+    sudo umount "$MNT2"
+  else
+    echo "[live] ERROR: could not loop-mount image read-only for harvest"
+  fi
+  [[ -n "$LOOP" ]] && sudo losetup -d "$LOOP" 2>/dev/null || true
+  rmdir "$MNT2" 2>/dev/null || true
+}
+
+# ============================================================================
+# Probe installation (CI-only, throwaway copy). Logic lives in script FILES:
+# systemd unit quoting cannot survive nested shell+python heredocs (run #97).
+# ============================================================================
 echo "[live] building disk image"
 bash ci/make-disk.sh "$ROOTFS" "$KERNEL" "$OUT" 8192
+echo "[live] installing probes into disk image"
+mount_rw
 
-# CI-ONLY: enable autologin on a throwaway copy of the disk so the screenshot
-# reaches the desktop. The shipped .mlpds installer keeps a real login screen.
-# --skip-oobe also pre-sets the OOBE sentinel on THIS copy only, so captures
-# show the full desktop instead of the first-boot setup wizard.
-echo "[live] injecting CI autologin into disk image"
-MNT="$(mktemp -d)"
-sudo mount -o loop "$OUT" "$MNT"
-sudo bash ci/inject-autologin.sh "$MNT" deposit --skip-oobe
-
-# Resource-metrics probe: once the desktop settles, record REAL idle RAM +
-# storage usage inside the running OS. Persisted into the image at
-# /var/log/deposit-metrics.txt so the CI job can harvest it after shutdown.
-# Probe logic lives in a script FILE (not an ExecStart one-liner): systemd
-# unit quoting cannot survive nested shell+python heredocs (see run #97).
-echo "[live] installing resource-metrics probe"
-sudo tee "$MNT/usr/local/sbin/deposit-metrics-probe.sh" >/dev/null <<'PROBE'
+# --- resource metrics -------------------------------------------------------
+sudo tee "$MNT_RW/usr/local/sbin/deposit-metrics-probe.sh" >/dev/null <<'PROBE'
 #!/bin/sh
 sleep 75
 {
@@ -47,7 +147,7 @@ sleep 75
   [ -f /var/log/Xorg.0.log ] && { echo "-- Xorg.0.log tail --"; tail -15 /var/log/Xorg.0.log; }
 } > /var/log/deposit-metrics.txt 2>&1
 PROBE
-sudo tee "$MNT/etc/systemd/system/deposit-metrics.service" >/dev/null <<'UNIT'
+sudo tee "$MNT_RW/etc/systemd/system/deposit-metrics.service" >/dev/null <<'UNIT'
 [Unit]
 Description=Deposit OS idle resource measurement
 After=graphical.target lightdm.service
@@ -59,16 +159,10 @@ ExecStart=/usr/local/sbin/deposit-metrics-probe.sh
 [Install]
 WantedBy=graphical.target
 UNIT
-sudo chmod +x "$MNT/usr/local/sbin/deposit-metrics-probe.sh"
-sudo mkdir -p "$MNT/etc/systemd/system/graphical.target.wants"
-sudo ln -sf /etc/systemd/system/deposit-metrics.service \
-            "$MNT/etc/systemd/system/graphical.target.wants/deposit-metrics.service"
+sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-metrics-probe.sh"
 
-# Graphics diagnostics + in-guest fb0 "truth camera": WHY (if ever) the
-# display stays black, plus a screenshot taken INSIDE the guest from
-# /dev/fb0 — independent of QEMU's display internals entirely.
-echo "[live] installing graphics-diagnostic probe"
-sudo tee "$MNT/usr/local/sbin/deposit-gfxdiag.sh" >/dev/null <<'GFX'
+# --- graphics diagnostics + generic fb0 truth camera ------------------------
+sudo tee "$MNT_RW/usr/local/sbin/deposit-gfxdiag.sh" >/dev/null <<'GFX'
 #!/bin/sh
 sleep 90
 {
@@ -83,17 +177,47 @@ sleep 90
   udevadm info /sys/devices/pci0000:00/0000:00:02.0 2>&1 | grep -E "MODALIAS|DRIVER"
   echo "-- lightdm/X status --"; systemctl is-active lightdm
   pgrep -a Xorg || echo "no Xorg process"
+  pgrep -a firefox || echo "no firefox process"
   [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log
-  echo "-- fb0 truth capture --"
-  python3 - <<'PYEOF'
+  echo "-- greeter/desktop log tail --"
+  journalctl -u lightdm -b --no-pager 2>/dev/null | tail -10
+} > /var/log/deposit-gfxdiag.txt 2>&1
+GFX
+sudo tee "$MNT_RW/etc/systemd/system/deposit-gfxdiag.service" >/dev/null <<'UNIT'
+[Unit]
+Description=Deposit OS graphics stack diagnostics
+After=graphical.target lightdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/deposit-gfxdiag.sh
+
+[Install]
+WantedBy=graphical.target
+UNIT
+sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-gfxdiag.sh"
+
+# fb0 truth camera: takes a suffix (login|desktop|web); sleeps per phase so
+# the capture lands after the relevant screen state settles.
+sudo tee "$MNT_RW/usr/local/sbin/deposit-shot.sh" >/dev/null <<'SHOT'
+#!/bin/sh
+SUF="${1:-x}"
+case "$SUF" in
+  login)   sleep 45 ;;   # greeter fully painted
+  desktop) sleep 40 ;;   # xfce panel up, before browser covers screen
+  web)     sleep 150 ;;  # youtube opened @55s, thai wiki tab @115s, loaded
+  *)       sleep 30 ;;
+esac
+python3 - "$SUF" <<'PYEOF'
 import sys
+suf = sys.argv[1]
 try:
     vs = open('/sys/class/graphics/fb0/virtual_size').read().split(',')
     w, h = int(vs[0]), int(vs[1])
     bpp = int(open('/sys/class/graphics/fb0/bits_per_pixel').read())
-    print('fb0 %dx%d %dbpp' % (w, h, bpp))
+    print('fb0 %dx%d %dbpp (%s)' % (w, h, bpp, suf))
     if bpp != 32:
-        print('skipping capture: need 32bpp'); sys.exit(0)
+        print('skipping capture: need 32bpp'); raise SystemExit(0)
     try:
         stride = int(open('/sys/class/graphics/fb0/stride').read())
     except Exception:
@@ -110,7 +234,7 @@ try:
         got += len(c)
     d = b''.join(parts)
     print('read %d of %d bytes from /dev/fb0' % (len(d), need))
-    o = open('/var/log/deposit-fb0.ppm', 'wb')
+    o = open('/var/log/deposit-fb0-%s.ppm' % suf, 'wb')
     o.write(b'P6\n%d %d\n255\n' % (w, h))
     rowbuf = bytearray(w * 3)
     rows_ok = 0
@@ -118,126 +242,102 @@ try:
         r = d[y*stride:y*stride + w*4]
         if len(r) < w*4:
             break
-        # BGRA/X in memory -> RGB, via strided slices (no per-pixel loop)
-        rowbuf[0::3] = r[2::4]
+        rowbuf[0::3] = r[2::4]   # BGRA/X in memory -> RGB out
         rowbuf[1::3] = r[1::4]
         rowbuf[2::3] = r[0::4]
         o.write(rowbuf)
         rows_ok += 1
     o.close()
-    print('wrote /var/log/deposit-fb0.ppm (%d/%d rows)' % (rows_ok, h))
+    print('wrote /var/log/deposit-fb0-%s.ppm (%d/%d rows)' % (suf, rows_ok, h))
+except SystemExit:
+    raise
 except Exception as e:
     print('fb0 capture failed:', e)
 PYEOF
-  ls -la /var/log/deposit-fb0.ppm 2>&1
-} > /var/log/deposit-gfxdiag.txt 2>&1
-GFX
-sudo tee "$MNT/etc/systemd/system/deposit-gfxdiag.service" >/dev/null <<'UNIT'
+SHOT
+sudo tee "$MNT_RW/etc/systemd/system/deposit-shot@.service" >/dev/null <<'UNIT'
 [Unit]
-Description=Deposit OS graphics stack diagnostics
+Description=Deposit OS fb0 screenshot (%i)
 After=graphical.target lightdm.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/deposit-gfxdiag.sh
+ExecStart=/usr/local/sbin/deposit-shot.sh %i
 
 [Install]
 WantedBy=graphical.target
 UNIT
-sudo chmod +x "$MNT/usr/local/sbin/deposit-gfxdiag.sh"
-sudo ln -sf /etc/systemd/system/deposit-gfxdiag.service \
-            "$MNT/etc/systemd/system/graphical.target.wants/deposit-gfxdiag.service"
+sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-shot.sh"
 
-sudo umount "$MNT"; rmdir "$MNT"
+# --- browser choreography (YouTube -> Thai Wikipedia tab) --------------------
+sudo tee "$MNT_RW/usr/local/sbin/deposit-web-open.sh" >/dev/null <<'WEB'
+#!/bin/sh
+sleep 55
+export HOME=/home/deposit USER=deposit LOGNAME=deposit DISPLAY=:0
+[ -r /home/deposit/.Xauthority ] && export XAUTHORITY=/home/deposit/.Xauthority
+ENV="env HOME=$HOME USER=$USER LOGNAME=$USER DISPLAY=:0"
+[ -n "${XAUTHORITY:-}" ] && ENV="$ENV XAUTHORITY=$XAUTHORITY"
+echo "opening youtube ($ENV)"
+runuser -u deposit -- sh -c "$ENV firefox-esr --new-window https://www.youtube.com >/tmp/firefox-yt.log 2>&1 &"
+sleep 60
+echo "opening thai wikipedia tab"
+runuser -u deposit -- sh -c "$ENV firefox-esr --new-tab https://th.wikipedia.org >/tmp/firefox-th.log 2>&1 &"
+WEB
+sudo tee "$MNT_RW/etc/systemd/system/deposit-web.service" >/dev/null <<'UNIT'
+[Unit]
+Description=Deposit OS web smoke test (YouTube + Thai Wikipedia)
+After=graphical.target lightdm.service network-online.target
+Wants=network-online.target
 
-VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
-[[ -n "$VMLINUZ" ]] || { echo "[live] no vmlinuz found"; exit 1; }
-echo "[live] kernel: $VMLINUZ"
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=/usr/local/sbin/deposit-web-open.sh
 
-echo "[live] launching QEMU (TCG, VNC on :0, QMP on 4444, serial -> /tmp/serial.log)"
-qemu-system-x86_64 \
-  -name "Deposit OS" \
-  -m 3072 -smp 2 -cpu max \
-  -kernel "$VMLINUZ" \
-  -append "root=/dev/sda rw rootfstype=ext4 console=tty0 console=ttyS0,115200n8 consoleblank=0" \
-  -drive file="$OUT",format=raw,if=ide \
-  -netdev user,id=n0 -device e1000,netdev=n0 \
-  -vga std \
-  -vnc :0 \
-  -serial file:/tmp/serial.log \
-  -qmp tcp:127.0.0.1:4444,server,nowait \
-  -daemonize
+[Install]
+WantedBy=graphical.target
+UNIT
+sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-web-open.sh"
 
-# Give QEMU a moment, then capture frames at increasing intervals so the
-# Actions Summary shows boot -> GUI -> AQA terminal progression.
-mkdir -p /tmp/shots
-times=(30 90 180 300 450 600)
-prev=0
-i=1
-for t in "${times[@]}"; do
-  sleep $((t - prev))
-  prev=$t
-  python3 ci/qmp_screendump.py "/tmp/shots/live-$i.png" 127.0.0.1 4444 --vnc-poke 5900 || \
-    echo "[live] screendump $i failed (vm may still be booting)"
-  # Keep the serial log growing into the shots dir so each artifact carries
-  # the full guest console up to this timestamp (diagnoses black frames).
-  cp /tmp/serial.log "/tmp/shots/serial-up-to-${t}s.log" 2>/dev/null || true
-  echo "[live] captured live-$i.png at ${t}s"
-  i=$((i + 1))
-done
+# ============================================================================
+# PHASE A — LOGIN PAGE (no autologin: the Andromeda greeter must be seen)
+# ============================================================================
+enable_unit deposit-shot@login.service
+sudo umount "$MNT_RW"; rmdir "$MNT_RW"
 
-# Graceful ACPI powerdown first: guest systemd syncs+unmounts cleanly, so
-# the ext4 journal is committed and the post-shutdown ro mount sees ALL
-# probe files (norecovery-only views can miss recently-committed data).
-echo "[live] sending ACPI powerdown"
-python3 ci/qmp_cmd.py 127.0.0.1 4444 system_powerdown >/dev/null 2>&1 || true
-for i in $(seq 1 30); do
-  pgrep -f qemu-system-x86_64 >/dev/null || break
-  sleep 2
-done
-pgrep -f qemu-system-x86_64 >/dev/null && { echo "[live] qemu still up — killing"; pkill -f qemu-system-x86_64 || true; sleep 3; }
-sleep 2
+launch_qemu
+capture_series login 45 105 165 225
+powerdown_and_wait
+cp /tmp/serial.log /tmp/shots/serial-login-final.log 2>/dev/null || true
+harvest_probes
+[ -s /tmp/deposit-fb0-login.ppm ] && convert_fb0 /tmp/deposit-fb0-login.ppm /tmp/shots/login-page.png \
+  || echo "[live] WARNING: no login fb0 frame this phase"
+
+# ============================================================================
+# PHASE B — DESKTOP + WEB (autologin on this throwaway copy only)
+# ============================================================================
+echo "[live] injecting CI autologin + enabling desktop/web probes"
+mount_rw
+sudo bash ci/inject-autologin.sh "$MNT_RW" deposit --skip-oobe
+enable_unit deposit-metrics.service
+enable_unit deposit-gfxdiag.service
+enable_unit "deposit-shot@desktop.service"
+enable_unit "deposit-shot@web.service"
+enable_unit deposit-web.service
+sudo umount "$MNT_RW"; rmdir "$MNT_RW"
+
+: > /tmp/serial.log
+launch_qemu
+capture_series live 40 100 160 220 280
+powerdown_and_wait
 cp /tmp/serial.log /tmp/shots/serial-final.log 2>/dev/null || \
   echo "[live] WARNING: no serial log — guest produced no serial output"
-
-# Harvest probe outputs from the image. ext4 refuses a plain ro mount when
-# the journal needs replay after our SIGTERM'd QEMU, so attach a fresh
-# READ-ONLY loop device and mount with norecovery.
-echo "[live] harvesting probes from image"
-MNT2="$(mktemp -d)"
-LOOP="$(sudo losetup -f --show -r "$OUT" 2>/dev/null)" || LOOP=""
-if [[ -n "$LOOP" ]] && sudo mount -o ro,norecovery "$LOOP" "$MNT2"; then
-  for f in deposit-metrics.txt deposit-gfxdiag.txt; do
-    if sudo test -s "$MNT2/var/log/$f"; then
-      sudo cp "$MNT2/var/log/$f" "/tmp/$f"
-      sudo chown "$(id -u):$(id -g)" "/tmp/$f"
-      echo "[live] harvested $f ✓"
-    else
-      echo "[live] WARNING: /var/log/$f missing or empty inside image"
-    fi
-  done
-  if sudo test -s "$MNT2/var/log/deposit-fb0.ppm"; then
-    sudo cp "$MNT2/var/log/deposit-fb0.ppm" /tmp/deposit-fb0.ppm
-    sudo chown "$(id -u):$(id -g)" /tmp/deposit-fb0.ppm
-    python3 - <<'PYC' || echo "[live] WARNING: fb0 conversion failed (non-fatal)"
-from PIL import Image, ImageFile
-ImageFile.LOAD_TRUNCATED_IMAGES = True
-try:
-    im = Image.open("/tmp/deposit-fb0.ppm")
-    im.save("/tmp/shots/guest-desktop.png")
-    print("[live] fb0 frame:", im.size, "-> /tmp/shots/guest-desktop.png")
-except Exception as e:
-    print("[live] fb0 convert failed:", e)
-PYC
-  else
-    echo "[live] WARNING: no fb0 frame inside image"
-  fi
-  sudo umount "$MNT2"
-else
-  echo "[live] ERROR: could not loop-mount image read-only for harvest"
-fi
-[[ -n "$LOOP" ]] && sudo losetup -d "$LOOP" 2>/dev/null || true
-rmdir "$MNT2" 2>/dev/null || true
+rm -f /tmp/deposit-fb0-*.ppm /tmp/deposit-metrics.txt /tmp/deposit-gfxdiag.txt
+harvest_probes
+[ -s /tmp/deposit-fb0-desktop.ppm ] && convert_fb0 /tmp/deposit-fb0-desktop.ppm /tmp/shots/guest-desktop.png \
+  || echo "[live] WARNING: no desktop fb0 frame this phase"
+[ -s /tmp/deposit-fb0-web.ppm ] && convert_fb0 /tmp/deposit-fb0-web.ppm /tmp/shots/thai-web.png \
+  || echo "[live] WARNING: no web fb0 frame this phase"
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
   || echo "[live] no metrics (see warnings above)"
 echo "[live] done"

@@ -65,7 +65,7 @@ DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
 # (they are not pulled in by --no-install-recommends elsewhere).
 # whiskermenu = the "Start" button for Windows-style mode (deposit-winmode).
 DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm lightdm-gtk-greeter xfce4-goodies xorg xserver-xorg-video-all xserver-xorg-input-all xfce4-whiskermenu-plugin \
-  breeze-gtk-theme breeze-cursor-theme accountsservice}"
+  breeze-gtk-theme breeze-cursor-theme accountsservice firefox-esr fonts-thai-tlwg}"
 
 # --- Windows-friendly layer (Beta 0.1.0.8+) ---------------------------------
 # Wine lets users run Windows installers (.exe/.msi) directly; ntfs-3g gives

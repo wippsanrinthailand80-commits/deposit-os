@@ -135,7 +135,8 @@ jobs:
       - name: install debootstrap
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends debootstrap
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            debootstrap librsvg2-bin
       - name: build rootfs
         # pipefail: without it, `| tee` masks a FAILED build-rootfs.sh and a
         # half-built rootfs gets packaged as "success" (the silent-truncation bug).
@@ -248,12 +249,24 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "![os mlpds](data:image/png;base64,$(base64 -w0 /tmp/os-shot/os.png))" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Deposit OS — live boot (boot screen, GUI, AQA terminal)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deposit OS — live boot (login page, desktop, Thai web test)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          [ -s /tmp/shots/login-page.png ] && {
+            echo "**Login page (in-guest framebuffer capture):**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "![login page](data:image/png;base64,$(base64 -w0 /tmp/shots/login-page.png))" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          }
           [ -s /tmp/shots/guest-desktop.png ] && {
             echo "**In-guest framebuffer capture (ground truth):**" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "![guest desktop](data:image/png;base64,$(base64 -w0 /tmp/shots/guest-desktop.png))" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          }
+          [ -s /tmp/shots/thai-web.png ] && {
+            echo "**Web + Thai language smoke test (YouTube tab → Thai Wikipedia):**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "![thai web](data:image/png;base64,$(base64 -w0 /tmp/shots/thai-web.png))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           }
           for p in /tmp/shots/live-*.png; do
@@ -268,8 +281,10 @@ jobs:
           name: os-and-live-screenshots
           path: |
             /tmp/os-shot/os.png
+            /tmp/shots/login-page.png
             /tmp/shots/live-*.png
             /tmp/shots/guest-desktop.png
+            /tmp/shots/thai-web.png
             /tmp/shots/serial-*.log
           if-no-files-found: warn
 

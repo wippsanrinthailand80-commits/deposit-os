@@ -652,6 +652,14 @@ for wp in wallpaper-andromeda.svg wallpaper-light.svg wallpaper-dark.svg wallpap
 done
 # Also install as pixmaps for greeter fallback (Andromeda is the hero art)
 cp "$REPO_ROOT/assets/wallpaper-andromeda.svg" "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" 2>/dev/null || true
+# Pre-render the hero wallpaper to PNG for the login screen. lightdm-gtk-
+# greeter loads its background via gdk-pixbuf and CRASHES on SVG when
+# librsvg's loader isn't installed — so we rasterize at build time.
+if command -v rsvg-convert >/dev/null 2>&1 && [[ -f "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" ]]; then
+  rsvg-convert -w 1920 -h 1080 -b '#0b1020' \
+    "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" \
+    -o "$ROOTFS/usr/share/backgrounds/deposit/wallpaper-andromeda.png" || true
+fi
 # Plymouth boot splash theme — spinner with Deposit branding on framebuffer
 chroot "$ROOTFS" /bin/bash -c 'plymouth-set-default-theme spinner 2>/dev/null || true' || true
 # Plymouth text + logo (nice UI during boot: show Beta version)
@@ -662,22 +670,25 @@ fi
 mkdir -p "$ROOTFS/etc/initramfs-tools/conf.d"
 echo "FRAMEBUFFER=y" > "$ROOTFS/etc/initramfs-tools/conf.d/splash"
 # LightDM greeter (dark Andromeda-toned login, rounded greeter)
+# Background: pre-rendered Andromeda PNG when available (see above), else the
+# solid deep-space color. Themes: Breeze ships via breeze-gtk-theme.
+GREETER_BG="/usr/share/backgrounds/deposit/wallpaper-andromeda.png"
+[[ -f "$ROOTFS$GREETER_BG" ]] || GREETER_BG="#0b1020"
 mkdir -p "$ROOTFS/etc/lightdm"
 cat > "$ROOTFS/etc/lightdm/lightdm-gtk-greeter.conf" <<GREETER
 [greeter]
-background=#0b1020
-theme-name=Materia-dark
-icon-theme-name=Papirus-Dark
-font-name=Noto Sans 11
+background=$GREETER_BG
+theme-name=Breeze-Dark
+font-name=DejaVu Sans 11
 xft-antialias=true
 xft-hintstyle=hintslight
-position=50%,center 50%,center
+position=center 45%,center
 clock-format=%a, %d %b  %H:%M
-indicators=~host;~spacer;~clock;~spacer;~power
+indicators=~host;~spacer;~clock;~spacer;~session;~language;~power
 GREETER
-# NOTE: background is a solid color on purpose. lightdm-gtk-greeter loads the
-# image via gdk-pixbuf; pointing it at an SVG crashed greeters on installs
-# where librsvg's loader wasn't pulled in ("Failed to start lightdm").
+# NOTE: background is a pre-rendered PNG on purpose (never an SVG).
+# lightdm-gtk-greeter loads images via gdk-pixbuf; pointing it at an SVG
+# crashed greeters on installs where librsvg's loader wasn't pulled in.
 # The XFCE desktop still uses the full Andromeda SVG wallpaper.
 
 # --- Windows-style mode templates (Beta 0.1.0.8, deposit-winmode) -----------
