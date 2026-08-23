@@ -27,9 +27,26 @@ sudo bash ci/inject-autologin.sh "$MNT" deposit --skip-oobe
 
 # Resource-metrics probe: once the desktop settles, record REAL idle RAM +
 # storage usage inside the running OS. Persisted into the image at
-# /var/log/deposit-metrics.txt so the CI job can harvest it after shutdown
-# (job *logs* may be unreadable, but artifacts are not).
+# /var/log/deposit-metrics.txt so the CI job can harvest it after shutdown.
+# Probe logic lives in a script FILE (not an ExecStart one-liner): systemd
+# unit quoting cannot survive nested shell+python heredocs (see run #97).
 echo "[live] installing resource-metrics probe"
+sudo tee "$MNT/usr/local/sbin/deposit-metrics-probe.sh" >/dev/null <<'PROBE'
+#!/bin/sh
+sleep 75
+{
+  echo "=== Deposit OS idle metrics ==="; date -u
+  echo "-- free -m --"; free -m
+  echo "-- df -h / --"; df -h /
+  echo "-- du -sx MB --"; du -sxm /usr /var /etc 2>/dev/null
+  echo; echo "=== boot diagnostics ==="
+  systemctl is-active lightdm
+  systemctl status lightdm --no-pager 2>&1 | tail -8
+  echo "-- journal (lightdm/X/fatal) --"
+  journalctl -b --no-pager 2>/dev/null | grep -iE "lightdm|xorg|fatal|failed" | tail -25
+  [ -f /var/log/Xorg.0.log ] && { echo "-- Xorg.0.log tail --"; tail -15 /var/log/Xorg.0.log; }
+} > /var/log/deposit-metrics.txt 2>&1
+PROBE
 sudo tee "$MNT/etc/systemd/system/deposit-metrics.service" >/dev/null <<'UNIT'
 [Unit]
 Description=Deposit OS idle resource measurement
@@ -37,18 +54,61 @@ After=graphical.target lightdm.service
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 75; { echo "=== Deposit OS idle metrics ==="; date -u; echo "-- free -m --"; free -m; echo "-- df -h / --"; df -h /; echo "-- du -sx MB --"; du -sxm /usr /var /etc 2>/dev/null; echo; echo "=== boot diagnostics ==="; systemctl is-active lightdm; systemctl status lightdm --no-pager 2>&1 | tail -8; echo "-- journal (lightdm/X/fatal) --"; journalctl -b --no-pager 2>/dev/null | grep -iE "lightdm|xorg|fatal|failed" | tail -25; [ -f /var/log/Xorg.0.log ] && { echo "-- Xorg.0.log tail --"; tail -15 /var/log/Xorg.0.log; }; } > /var/log/deposit-metrics.txt 2>&1'
+ExecStart=/usr/local/sbin/deposit-metrics-probe.sh
 
 [Install]
 WantedBy=graphical.target
 UNIT
+sudo chmod +x "$MNT/usr/local/sbin/deposit-metrics-probe.sh"
 sudo mkdir -p "$MNT/etc/systemd/system/graphical.target.wants"
 sudo ln -sf /etc/systemd/system/deposit-metrics.service \
             "$MNT/etc/systemd/system/graphical.target.wants/deposit-metrics.service"
 
-# Graphics diagnostics: WHY (if ever) the display stays black. Written into
-# the image at /var/log/deposit-gfxdiag.txt and harvested with the metrics.
+# Graphics diagnostics + in-guest fb0 "truth camera": WHY (if ever) the
+# display stays black, plus a screenshot taken INSIDE the guest from
+# /dev/fb0 — independent of QEMU's display internals entirely.
 echo "[live] installing graphics-diagnostic probe"
+sudo tee "$MNT/usr/local/sbin/deposit-gfxdiag.sh" >/dev/null <<'GFX'
+#!/bin/sh
+sleep 90
+{
+  echo "=== Deposit OS graphics diagnostics ==="; date -u
+  echo "-- modules dir --"; ls /lib/modules/$(uname -r)/ 2>&1 | head -6
+  echo "-- drm/tiny modules present? --"; ls /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/tiny/ 2>&1
+  echo "-- modprobe bochs --"; modprobe bochs 2>&1; echo "rc=$?"
+  echo "-- sysfs --"; ls /sys/class/drm/ 2>&1; ls /sys/class/graphics/ 2>&1
+  echo "-- lsmod (gpu) --"; lsmod | grep -E "bochs|cirrus|drm|ttm" || echo none
+  echo "-- dmesg drm --"; dmesg 2>/dev/null | grep -iE "drm|bochs|fbcon|framebuffer" | tail -15
+  echo "-- udevadm info VGA --"; udevadm info -q all -n /dev/dri/card0 2>&1 | head -5
+  udevadm info /sys/devices/pci0000:00/0000:00:02.0 2>&1 | grep -E "MODALIAS|DRIVER"
+  echo "-- lightdm/X status --"; systemctl is-active lightdm
+  pgrep -a Xorg || echo "no Xorg process"
+  [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log
+  echo "-- fb0 truth capture --"
+  python3 - <<'PYEOF'
+import sys
+try:
+    vs = open('/sys/class/graphics/fb0/virtual_size').read().split(',')
+    w, h = int(vs[0]), int(vs[1])
+    bpp = int(open('/sys/class/graphics/fb0/bits_per_pixel').read())
+    print('fb0 %dx%d %dbpp' % (w, h, bpp))
+    if bpp != 32:
+        print('skipping capture: need 32bpp'); sys.exit(0)
+    d = open('/dev/fb0', 'rb').read()
+    row = w * 4
+    o = open('/var/log/deposit-fb0.ppm', 'wb')
+    o.write(b'P6\n%d %d\n255\n' % (w, h))
+    for y in range(h):
+        r = d[y*row:y*row+w*4]
+        o.write(bytes((r[i+2], r[i+1], r[i]) for i in range(0, w*4, 4)))
+    o.close()
+    print('wrote /var/log/deposit-fb0.ppm')
+except Exception as e:
+    print('fb0 capture failed:', e)
+PYEOF
+  ls -la /var/log/deposit-fb0.ppm 2>&1
+} > /var/log/deposit-gfxdiag.txt 2>&1
+GFX
 sudo tee "$MNT/etc/systemd/system/deposit-gfxdiag.service" >/dev/null <<'UNIT'
 [Unit]
 Description=Deposit OS graphics stack diagnostics
@@ -56,31 +116,12 @@ After=graphical.target lightdm.service
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 90; { echo "=== Deposit OS graphics diagnostics ==="; date -u; echo "-- modules dir --"; ls /lib/modules/$(uname -r)/ 2>&1 | head -6; echo "-- drm/tiny modules present? --"; ls /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/tiny/ 2>&1; echo "-- modprobe bochs --"; modprobe bochs 2>&1; echo "rc=$?"; echo "-- sysfs --"; ls /sys/class/drm/ 2>&1; ls /sys/class/graphics/ 2>&1; echo "-- lsmod (gpu) --"; lsmod | grep -E "bochs|cirrus|drm|ttm" || echo none; echo "-- dmesg drm --"; dmesg 2>/dev/null | grep -iE "drm|bochs|fbcon|framebuffer" | tail -15; echo "-- udevadm info VGA --"; udevadm info -q all -n /dev/dri/card0 2>&1 | head -5; udevadm info /sys/devices/pci0000:00/0000:00:02.0 2>&1 | grep -E "MODALIAS|DRIVER" ; echo "-- lightdm/X status --"; systemctl is-active lightdm; pgrep -a Xorg || echo "no Xorg process"; [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log; echo "-- fb0 truth capture --"; python3 -c "
-import sys
-try:
-    vs=open('/sys/class/graphics/fb0/virtual_size').read().split(',')
-    w,h=int(vs[0]),int(vs[1])
-    bpp=int(open('/sys/class/graphics/fb0/bits_per_pixel').read())
-    print('fb0 %dx%d %dbpp' % (w,h,bpp))
-    if bpp != 32:
-        sys.exit(0)
-    d=open('/dev/fb0','rb').read()
-    row=w*4
-    o=open('/var/log/deposit-fb0.ppm','wb')
-    o.write(b'P6\n%d %d\n255\n'%(w,h))
-    for y in range(h):
-        r=d[y*row:y*row+w*4]
-        o.write(bytes((r[i+2],r[i+1],r[i]) for i in range(0,w*4,4)))
-    o.close()
-    print('wrote /var/log/deposit-fb0.ppm')
-except Exception as e:
-    print('fb0 capture failed:',e)
-" 2>&1; ls -la /var/log/deposit-fb0.ppm 2>&1; } > /var/log/deposit-gfxdiag.txt 2>&1'
+ExecStart=/usr/local/sbin/deposit-gfxdiag.sh
 
 [Install]
 WantedBy=graphical.target
 UNIT
+sudo chmod +x "$MNT/usr/local/sbin/deposit-gfxdiag.sh"
 sudo ln -sf /etc/systemd/system/deposit-gfxdiag.service \
             "$MNT/etc/systemd/system/graphical.target.wants/deposit-gfxdiag.service"
 
@@ -122,8 +163,17 @@ for t in "${times[@]}"; do
   i=$((i + 1))
 done
 
-pkill -f qemu-system-x86_64 || true
-sleep 3
+# Graceful ACPI powerdown first: guest systemd syncs+unmounts cleanly, so
+# the ext4 journal is committed and the post-shutdown ro mount sees ALL
+# probe files (norecovery-only views can miss recently-committed data).
+echo "[live] sending ACPI powerdown"
+python3 ci/qmp_cmd.py 127.0.0.1 4444 system_powerdown >/dev/null 2>&1 || true
+for i in $(seq 1 30); do
+  pgrep -f qemu-system-x86_64 >/dev/null || break
+  sleep 2
+done
+pgrep -f qemu-system-x86_64 >/dev/null && { echo "[live] qemu still up — killing"; pkill -f qemu-system-x86_64 || true; sleep 3; }
+sleep 2
 cp /tmp/serial.log /tmp/shots/serial-final.log 2>/dev/null || \
   echo "[live] WARNING: no serial log — guest produced no serial output"
 
