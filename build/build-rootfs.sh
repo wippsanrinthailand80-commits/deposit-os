@@ -736,13 +736,49 @@ cat > "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<XFD
     </property>
     <property name="screen0" type="empty">
       <property name="monitor0" type="empty">
-        <property name="image-style" type="int" value="5"/>
-        <property name="last-image" type="string" value="$DESK_JPG"/>
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="$DESK_JPG"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
       </property>
     </property>
   </property>
 </channel>
 XFD
+
+# Belt & suspenders: xfdesktop stores wallpaper PER ACTUAL MONITOR NAME
+# (Virtual-1 in QEMU, eDP-1/HDMI-A-1 on laptops) and ignores generic
+# defaults when those keys are absent — run #105 proved the Sgr A* photo
+# never appeared. This autostart enforcer sets the backdrop for every
+# connected output right after login, then pokes xfdesktop to repaint.
+sudo tee "$ROOTFS/usr/local/sbin/deposit-set-wallpaper.sh" >/dev/null <<'WALL'
+#!/bin/sh
+sleep 3
+IMG_DESK=/usr/share/backgrounds/deposit/sagittarius-a.jpg
+[ -f "$IMG_DESK" ] || exit 0
+set_bg(){ xfconf-query -c xfce4-desktop -p "$1" -t string -s "$2" --create >/dev/null 2>&1 || true; }
+set_style(){ xfconf-query -c xfce4-desktop -p "$1" -t int -s 5 --create >/dev/null 2>&1 || true; }
+MONS="$(xrandr --query 2>/dev/null | awk '/ connected/{print $1}')"
+[ -z "$MONS" ] && MONS="Virtual-1 monitor0"
+for M in $MONS monitor0; do
+  set_bg "/backdrop/screen0/$M/workspace0/last-image" "$IMG_DESK"
+  set_style "/backdrop/screen0/$M/workspace0/image-style"
+  set_bg "/backdrop/screen0/$M/last-image" "$IMG_DESK"
+  set_style "/backdrop/screen0/$M/image-style"
+done
+pkill -HUP xfdesktop 2>/dev/null || true
+WALL
+chmod +x "$ROOTFS/usr/local/sbin/deposit-set-wallpaper.sh"
+mkdir -p "$ROOTFS/etc/xdg/autostart"
+cat > "$ROOTFS/etc/xdg/autostart/deposit-wallpaper.desktop" <<DESKF
+[Desktop Entry]
+Type=Application
+Name=Deposit OS wallpaper
+Comment=Apply the Sagittarius A* desktop backdrop on every output
+Exec=/usr/local/sbin/deposit-set-wallpaper.sh
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+DESKF
 
 # Plymouth watermark: rasterize the galaxy logo properly (the old build
 # copied raw SVG bytes into a .png filename, which plymouth can't render).

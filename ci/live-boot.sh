@@ -191,6 +191,11 @@ sleep 150
   [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log
   echo "-- greeter/desktop log tail --"
   journalctl -u lightdm -b --no-pager 2>/dev/null | tail -10
+  echo "-- backdrop proof (user xfconf after autostart enforcer) --"
+  grep -h "last-image\|image-style" \
+    /home/deposit/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null \
+    || echo "no user xfconf backdrop written yet"
+  ls -la /usr/share/backgrounds/deposit/ 2>&1
 } > /var/log/deposit-gfxdiag.txt 2>&1
 GFX
 sudo tee "$MNT_RW/etc/systemd/system/deposit-gfxdiag.service" >/dev/null <<'UNIT'
