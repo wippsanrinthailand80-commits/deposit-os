@@ -839,6 +839,13 @@ cat > "$ROOTFS/etc/deposit/apk.conf" <<EOF
 ALLOW_INSECURE="ask"
 EOF
 
+# Force-load the QEMU/Bochs KMS driver at boot so VMs and machines with
+# std-VGA-class adapters get a real framebuffer (fbcon + X modesetting).
+# Harmless on other hardware: the driver simply doesn't bind.
+mkdir -p "$ROOTFS/etc/modules-load.d"
+printf '# Deposit OS: display stack for QEMU/std-VGA-class hardware\nbochs\ncirrus\n' \
+  > "$ROOTFS/etc/modules-load.d/deposit-gpu.conf"
+
 # --- Stage 8: graphical first-boot (autologin straight into XFCE) ------------
 # This is what makes "boot the OS" land on the Deposit OS desktop.
 chroot "$ROOTFS" /bin/bash -c '

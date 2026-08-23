@@ -237,7 +237,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deposit-idle-metrics
-          path: /tmp/deposit-metrics.txt
+          path: |
+            /tmp/deposit-metrics.txt
+            /tmp/deposit-gfxdiag.txt
           if-no-files-found: warn
       - name: publish screenshots to job summary
         if: always()

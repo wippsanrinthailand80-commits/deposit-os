@@ -46,6 +46,24 @@ sudo mkdir -p "$MNT/etc/systemd/system/graphical.target.wants"
 sudo ln -sf /etc/systemd/system/deposit-metrics.service \
             "$MNT/etc/systemd/system/graphical.target.wants/deposit-metrics.service"
 
+# Graphics diagnostics: WHY (if ever) the display stays black. Written into
+# the image at /var/log/deposit-gfxdiag.txt and harvested with the metrics.
+echo "[live] installing graphics-diagnostic probe"
+sudo tee "$MNT/etc/systemd/system/deposit-gfxdiag.service" >/dev/null <<'UNIT'
+[Unit]
+Description=Deposit OS graphics stack diagnostics
+After=graphical.target lightdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'sleep 90; { echo "=== Deposit OS graphics diagnostics ==="; date -u; echo "-- modules dir --"; ls /lib/modules/$(uname -r)/ 2>&1 | head -6; echo "-- drm/tiny modules present? --"; ls /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/tiny/ 2>&1; echo "-- modprobe bochs --"; modprobe bochs 2>&1; echo "rc=$?"; echo "-- sysfs --"; ls /sys/class/drm/ 2>&1; ls /sys/class/graphics/ 2>&1; echo "-- lsmod (gpu) --"; lsmod | grep -E "bochs|cirrus|drm|ttm" || echo none; echo "-- dmesg drm --"; dmesg 2>/dev/null | grep -iE "drm|bochs|fbcon|framebuffer" | tail -15; echo "-- udevadm info VGA --"; udevadm info -q all -n /dev/dri/card0 2>&1 | head -5; udevadm info /sys/devices/pci0000:00/0000:00:02.0 2>&1 | grep -E "MODALIAS|DRIVER" ; echo "-- lightdm/X status --"; systemctl is-active lightdm; pgrep -a Xorg || echo "no Xorg process"; [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log; } > /var/log/deposit-gfxdiag.txt 2>&1'
+
+[Install]
+WantedBy=graphical.target
+UNIT
+sudo ln -sf /etc/systemd/system/deposit-gfxdiag.service \
+            "$MNT/etc/systemd/system/graphical.target.wants/deposit-gfxdiag.service"
+
 sudo umount "$MNT"; rmdir "$MNT"
 
 VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
@@ -89,24 +107,28 @@ sleep 3
 cp /tmp/serial.log /tmp/shots/serial-final.log 2>/dev/null || \
   echo "[live] WARNING: no serial log — guest produced no serial output"
 
-# Harvest the metrics the probe wrote into the image (persistent ext4).
-echo "[live] harvesting resource metrics from image"
+# Harvest probe outputs from the image. ext4 refuses a plain ro mount when
+# the journal needs replay after our SIGTERM'd QEMU, so attach a fresh
+# READ-ONLY loop device and mount with norecovery.
+echo "[live] harvesting probes from image"
 MNT2="$(mktemp -d)"
-if sudo mount -o loop,ro "$OUT" "$MNT2"; then
-  if sudo ls -la "$MNT2/var/log/deposit-metrics.txt" 2>/dev/null; then
-    sudo cp "$MNT2/var/log/deposit-metrics.txt" /tmp/deposit-metrics.txt
-    sudo chown "$(id -u):$(id -g)" /tmp/deposit-metrics.txt
-    echo "[live] metrics harvested ✓"
-  else
-    echo "[live] WARNING: probe file missing inside image:"
-    sudo ls -la "$MNT2/var/log/" | tail -5 || true
-  fi
-  sudo ls -la "$MNT2/etc/systemd/system/graphical.target.wants/" 2>/dev/null | head -8 || true
+LOOP="$(sudo losetup -f --show -r "$OUT" 2>/dev/null)" || LOOP=""
+if [[ -n "$LOOP" ]] && sudo mount -o ro,norecovery "$LOOP" "$MNT2"; then
+  for f in deposit-metrics.txt deposit-gfxdiag.txt; do
+    if sudo test -s "$MNT2/var/log/$f"; then
+      sudo cp "$MNT2/var/log/$f" "/tmp/$f"
+      sudo chown "$(id -u):$(id -g)" "/tmp/$f"
+      echo "[live] harvested $f ✓"
+    else
+      echo "[live] WARNING: /var/log/$f missing or empty inside image"
+    fi
+  done
   sudo umount "$MNT2"
 else
-  echo "[live] ERROR: could not loop-mount image for harvest"
+  echo "[live] ERROR: could not loop-mount image read-only for harvest"
 fi
+[[ -n "$LOOP" ]] && sudo losetup -d "$LOOP" 2>/dev/null || true
 rmdir "$MNT2" 2>/dev/null || true
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
-  || echo "[live] no metrics file (probe did not run? see warnings above)"
+  || echo "[live] no metrics (see warnings above)"
 echo "[live] done"
