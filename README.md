@@ -53,11 +53,16 @@ packaging format (`.mlpds`) with the `aqa` installer.
 
 ## Screenshots
 
-| Boot screen | Desktop + quick menu | Turbo transition | `.mlpds` info | Tool demo |
-|-------------|---------------------|------------------|---------------|-----------|
-| ![boot](docs/assets/boot.png) | ![desktop](docs/assets/desktop.png) | ![turbo](docs/assets/turbo.png) | ![mlpds](docs/assets/mlpds.png) | ![demo](docs/assets/tool-demo.png) |
+Captured automatically by CI from the real running OS (QMP ground truth),
+then committed here. Full-res originals live on each Actions run.
 
-(Generated automatically in CI and embedded in each Actions run Summary.)
+| Desktop — Sagittarius A\* wallpaper | Thai typing test (`เพลงไทย` in YouTube search) | `.mlpds` info | Tool demo |
+|-------------------------------------|------------------------------------------------|---------------|-----------|
+| ![desktop](docs/assets/desktop.png) | ![thai](docs/assets/thai-youtube.png)          | ![mlpds](docs/assets/mlpds.png) | ![demo](docs/assets/tool-demo.png) |
+
+The **login screen** (Andromeda galaxy greeter) is captured on the runs that
+include it — see `login-page.png` on older run artifacts and the phone-ready
+copies published per release.
 
 ## Architecture
 

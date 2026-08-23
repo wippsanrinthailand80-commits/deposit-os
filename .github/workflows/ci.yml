@@ -260,33 +260,46 @@ jobs:
       - name: publish screenshots to job summary
         if: always()
         run: |
+          # GitHub step summaries cap at 1024 KB total. Full-res PNGs blow
+          # past that (2.7 MB in run #105), so embed 640px JPEG previews
+          # instead; full-res originals stay in the artifact.
+          python3 - <<'PY'
+          import glob, os
+          from PIL import Image
+          os.makedirs("/tmp/summary", exist_ok=True)
+          for p in glob.glob("/tmp/shots/*.png"):
+              try:
+                  im = Image.open(p).convert("RGB")
+                  if im.width > 640:
+                      im = im.resize((640, int(im.height * 640 / im.width)), Image.LANCZOS)
+                  dst = "/tmp/summary/" + os.path.basename(p).rsplit(".", 1)[0] + ".jpg"
+                  im.save(dst, "JPEG", quality=60, optimize=True)
+              except Exception as e:
+                  print("skip", p, e)
+          PY
           echo "### Deposit OS — packaged .mlpds (info)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "![os mlpds](data:image/png;base64,$(base64 -w0 /tmp/os-shot/os.png))" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          [ -s /tmp/summary/os.jpg ] && {
+            echo "![os mlpds](data:image/jpeg;base64,$(base64 -w0 /tmp/summary/os.jpg))" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          }
           echo "### Deposit OS — live boot (Sgr A* desktop, Thai YouTube typing test)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          [ -s /tmp/shots/login-page.png ] && {
-            echo "**Login page (in-guest framebuffer capture):**" >> "$GITHUB_STEP_SUMMARY"
+          [ -s /tmp/summary/guest-desktop.jpg ] && {
+            echo "**Desktop (Sagittarius A* wallpaper):**" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "![login page](data:image/png;base64,$(base64 -w0 /tmp/shots/login-page.png))" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-          }
-          [ -s /tmp/shots/guest-desktop.png ] && {
-            echo "**In-guest framebuffer capture (ground truth):**" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "![guest desktop](data:image/png;base64,$(base64 -w0 /tmp/shots/guest-desktop.png))" >> "$GITHUB_STEP_SUMMARY"
+            echo "![guest desktop](data:image/jpeg;base64,$(base64 -w0 /tmp/summary/guest-desktop.jpg))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           }
-          [ -s /tmp/shots/thai-web.png ] && {
-            echo "**Web + Thai language smoke test (YouTube tab → Thai Wikipedia):**" >> "$GITHUB_STEP_SUMMARY"
+          [ -s /tmp/summary/thai-web.jpg ] && {
+            echo "**Thai typing test (เพลงไทย typed into YouTube search):**" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "![thai web](data:image/png;base64,$(base64 -w0 /tmp/shots/thai-web.png))" >> "$GITHUB_STEP_SUMMARY"
+            echo "![thai web](data:image/jpeg;base64,$(base64 -w0 /tmp/summary/thai-web.jpg))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           }
-          for p in /tmp/shots/login-*.png /tmp/shots/live-*.png; do
+          for p in /tmp/summary/login-*.jpg /tmp/summary/live-*.jpg; do
             [ -s "$p" ] || continue
-            echo "![live $(basename "$p")](data:image/png;base64,$(base64 -w0 "$p"))" >> "$GITHUB_STEP_SUMMARY"
+            echo "![live $(basename "$p")](data:image/jpeg;base64,$(base64 -w0 "$p"))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           done
       - name: upload screenshots
