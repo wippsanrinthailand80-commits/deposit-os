@@ -31,20 +31,28 @@ KREL="$(cat "$KDIR/include/config/kernel.release" 2>/dev/null)" || fail "kernel.
 log "kernel release: $KREL"
 
 # --- 1. Open GPU kernel modules ---------------------------------------------
-log "cloning open-gpu-kernel-modules $NV_VER"
-rm -rf ogkm
-git clone -q --depth 1 --branch "$NV_VER" \
-  https://github.com/NVIDIA/open-gpu-kernel-modules ogkm \
-  || fail "could not clone tag $NV_VER (check DEPOSIT_NVIDIA_VERSION)"
+# NOTE: NVIDIA's GitHub tags do NOT ship nvidia/nv-kernel.o_binary (the
+# prebuilt core) — run #106 died with "No rule to make target". The blob only
+# exists inside the official .run installer, so we extract kernel-open from
+# there and build that.
+log "downloading NVIDIA-Linux-x86_64-$NV_VER.run"
+RUN_URL="https://us.download.nvidia.com/XFree86/Linux-x86_64/$NV_VER/NVIDIA-Linux-x86_64-$NV_VER.run"
+curl -sSL --retry 3 --max-time 900 -o /tmp/nvidia.run "$RUN_URL" \
+  || fail "could not download $RUN_URL"
+EXT="$(mktemp -d)/ext"
+sh /tmp/nvidia.run --extract-only --target="$EXT" > /tmp/nvidia-extract.log 2>&1 \
+  || { tail -10 /tmp/nvidia-extract.log; fail "run extraction failed"; }
+[[ -d "$EXT/kernel-open" ]] || fail "no kernel-open in .run"
+[[ -f "$EXT/kernel-open/nvidia/nv-kernel.o_binary" ]] || fail "nv-kernel.o_binary still missing"
 
 log "building kernel modules (this takes a few minutes)"
-make -j"$(nproc)" -C ogkm/kernel-open \
+make -j"$(nproc)" -C "$EXT/kernel-open" \
      SYSSRC="$KDIR" SYSOUT="$KDIR" modules \
   > /tmp/nvidia-kbuild.log 2>&1 || { tail -30 /tmp/nvidia-kbuild.log; fail "kbuild failed"; }
 
 MODS=""
-for m in nvidia nvidia-modeset nvidia-drm nvidia-uvm nvidia-peermem nvidia-nvswitch nvidia-vgpu; do
-  [[ -f "ogkm/kernel-open/$m.ko" ]] && MODS="$MODS ogkm/kernel-open/$m.ko"
+for m in nvidia nvidia-modeset nvidia-drm nvidia-uvm nvidia-peermem; do
+  [[ -f "$EXT/kernel-open/$m.ko" ]] && MODS="$MODS $EXT/kernel-open/$m.ko"
 done
 [[ -n "$MODS" ]] || { tail -30 /tmp/nvidia-kbuild.log; fail "no modules produced"; }
 log "built modules:$MODS"
@@ -64,7 +72,7 @@ mkdir -p "$PAYLOAD"
 for d in "$DL"/*.deb; do dpkg -x "$d" "$PAYLOAD"; done
 mkdir -p "$PAYLOAD/lib/modules/$KREL/updates/drm"
 for f in $MODS; do
-  install -m 0644 "$REPO/$f" "$PAYLOAD/lib/modules/$KREL/updates/drm/"
+  install -m 0644 "$f" "$PAYLOAD/lib/modules/$KREL/updates/drm/"
 done
 echo "$KREL" > "$PAYLOAD/KERNEL_RELEASE"
 mkdir -p "$PAYLOAD/etc/modules-load.d"
