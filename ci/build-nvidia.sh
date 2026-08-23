@@ -39,9 +39,12 @@ log "downloading NVIDIA-Linux-x86_64-$NV_VER.run"
 RUN_URL="https://us.download.nvidia.com/XFree86/Linux-x86_64/$NV_VER/NVIDIA-Linux-x86_64-$NV_VER.run"
 curl -sSL --retry 3 --max-time 900 -o /tmp/nvidia.run "$RUN_URL" \
   || fail "could not download $RUN_URL"
-EXT="$(mktemp -d)/ext"
-sh /tmp/nvidia.run --extract-only --target="$EXT" > /tmp/nvidia-extract.log 2>&1 \
+# NOTE 2: this .run version IGNORES --target; it always extracts into
+# ./NVIDIA-Linux-x86_64-$VER relative to CWD, so extract inside a scratch dir.
+EXD="$(mktemp -d)"
+( cd "$EXD" && sh /tmp/nvidia.run --extract-only > /tmp/nvidia-extract.log 2>&1 ) \
   || { tail -10 /tmp/nvidia-extract.log; fail "run extraction failed"; }
+EXT="$EXD/NVIDIA-Linux-x86_64-$NV_VER"
 [[ -d "$EXT/kernel-open" ]] || fail "no kernel-open in .run"
 [[ -f "$EXT/kernel-open/nvidia/nv-kernel.o_binary" ]] || fail "nv-kernel.o_binary still missing"
 
