@@ -62,12 +62,18 @@ log "built modules:$MODS"
 
 # --- 2. Userspace from Ubuntu multiverse (unmodified debs) -------------------
 log "fetching Ubuntu userspace packages (series $UBU_SERIES)"
-PKGS="libnvidia-gl-$UBU_SERIES xserver-xorg-video-nvidia-$UBU_SERIES \
-      libnvidia-encode-$UBU_SERIES libnvidia-firmware-$UBU_SERIES \
-      nvidia-utils-$UBU_SERIES libnvidia-cfg1-$UBU_SERIES"
+# NOTE: libnvidia-firmware-<series> only exists for newer series (555+);
+# noble's 550 set has no firmware package (run #110).
+PKGS="libnvidia-common-$UBU_SERIES libnvidia-compute-$UBU_SERIES \
+      libnvidia-cfg1-$UBU_SERIES libnvidia-gl-$UBU_SERIES \
+      libnvidia-encode-$UBU_SERIES libnvidia-decode-$UBU_SERIES \
+      nvidia-utils-$UBU_SERIES xserver-xorg-video-nvidia-$UBU_SERIES"
 DL="$(mktemp -d)"
-( cd "$DL" && apt-get download $PKGS ) > /tmp/nvidia-dl.log 2>&1 \
-  || { tail -20 /tmp/nvidia-dl.log; fail "userspace download failed"; }
+for p in $PKGS; do
+  ( cd "$DL" && apt-get download "$p" ) >> /tmp/nvidia-dl.log 2>&1 \
+    || log "WARN: no deb for $p in this series (skipped)"
+done
+ls -A "$DL" | grep -q ".deb" || { tail -20 /tmp/nvidia-dl.log; fail "no userspace debs downloaded"; }
 
 # --- 3. Assemble payload (absolute-layout tree) -----------------------------
 PAYLOAD="$DL/payload"
