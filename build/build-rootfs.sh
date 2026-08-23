@@ -751,6 +751,22 @@ if command -v rsvg-convert >/dev/null 2>&1 && [[ -f "$ROOTFS/usr/share/pixmaps/d
     -o "$ROOTFS/usr/share/plymouth/themes/spinner/watermark.png" || true
 fi
 
+# Boot splash "deposit": clone the upstream spinner theme, rename it, and
+# paint a deep-space purple gradient behind the galaxy watermark + progress
+# dots. Falls back to plain spinner automatically if anything above failed.
+SP_PLY="$ROOTFS/usr/share/plymouth/themes/spinner"
+DP_PLY="$ROOTFS/usr/share/plymouth/themes/deposit"
+if [[ -f "$SP_PLY/spinner.plymouth" ]]; then
+  rm -rf "$DP_PLY"
+  mkdir -p "$DP_PLY"
+  cp -a "$SP_PLY/." "$DP_PLY/"
+  mv "$DP_PLY/spinner.plymouth" "$DP_PLY/deposit.plymouth"
+  sed -i 's/^Name=.*/Name=Deposit OS/' "$DP_PLY/deposit.plymouth"
+  grep -q '^BackgroundStartColor=' "$DP_PLY/deposit.plymouth" || \
+    printf 'BackgroundStartColor=0x0a0630\nBackgroundEndColor=0x1b1040\n' >> "$DP_PLY/deposit.plymouth"
+  chroot "$ROOTFS" plymouth-set-default-theme deposit 2>/dev/null || true
+fi
+
 # --- Windows-style mode templates (Beta 0.1.0.8, deposit-winmode) -----------
 # Two full xfce4-panel layouts shipped read-only; deposit-winmode copies the
 # chosen one into the user's xfconf and restarts the panel. No root needed

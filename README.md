@@ -6,7 +6,7 @@ Deposit OS runs standard Ubuntu/Debian `.deb` packages (via `apt`/`dpkg`),
 runs Windows installers (`.exe`/`.msi`) through Wine, and adds its own
 packaging format (`.mlpds`) with the `aqa` installer.
 
-**Beta `0.1.1`** · Andromeda purple-blue theme · x86_64 **and** ARM64
+**Beta `0.1.2`** · Andromeda login · Sagittarius A\* desktop · x86_64 **and** ARM64
 
 ## Highlights
 
@@ -34,9 +34,18 @@ packaging format (`.mlpds`) with the `aqa` installer.
   Brightness and Volume sliders, Security section, Settings + About tiles.
 - **Settings hub**: One UI-inspired settings app — now with a one-tap
   **Windows Mode** row.
-- **Andromeda theme**: hand-drawn spiral-galaxy wallpaper (light/dark/
-  abstract alternates included), Materia-dark + Papirus-Dark, deep-purple
-  translucent panel, branded Plymouth splash.
+- **Galaxy brand, end to end**: the real **Andromeda galaxy** (Adam Evans,
+  CC BY 2.0) greets you at the login screen; your desktop shows **Sagittarius
+  A\*** — the Event Horizon Telescope image of the black hole at the center
+  of our Milky Way (CC BY 4.0). New spiral-galaxy logo on the panel, About,
+  and a re-branded deep-space **Plymouth boot splash**.
+- **NVIDIA graphics (Beta)**: CI builds NVIDIA's **open kernel modules**
+  against our own 6.6.58 kernel and ships them with matching Ubuntu userspace
+  as one signed `.mlpds` driver package (`nvidia-driver-beta` artifact).
+  Turing and newer, `aqa install`, reboot, done.
+- **Thai language** support out of the box (fonts-thai-tlwg + IBus) — and
+  proven in CI: the live-boot pipeline literally *types Thai* (`เพลงไทย`)
+  into YouTube's search box via XTEST and screenshots the results.
 - **Security hardening**: AppArmor in the kernel, ClamAV, `ufw`, random root
   password replaced at first login, typed confirmation before any disk wipe,
   self-wipe protection for the installer, GPG verification for packages.
@@ -59,7 +68,7 @@ packaging format (`.mlpds`) with the `aqa` installer.
 | Init system  | systemd |
 | Packaging    | `dpkg`/`apt` + Deposit `.mlpds` (`tools/mlpds`) |
 | Installer    | `aqa` (`tools/aqa`) |
-| Desktop      | XFCE4 + LightDM · Materia-dark / Papirus-Dark · Andromeda wallpaper |
+| Desktop      | XFCE4 + LightDM · Breeze-Dark greeter · Andromeda login / Sgr A\* desktop · xdotool-driven Thai smoke test in CI |
 | Windows apps | Wine + winetricks (`tools/deposit-win`), layout via `tools/deposit-winmode` |
 | Live media   | GRUB2 + `live-boot` + SquashFS ISO (x86_64) · GPT/UEFI image (ARM64) |
 | Security     | AppArmor (kernel) · ClamAV · ufw · signed `.mlpds` |
@@ -87,7 +96,9 @@ screenshots.
 Push to `main` (or open a PR). The CI pipeline:
 
 1. **mlpds tool + scripts + demo** — unit tests and a tool-demo screenshot.
-2. **build-kernel** — compiles the kernel (cached between runs).
+2. **build-kernel** — compiles the kernel (cached between runs), then builds
+   the **NVIDIA beta driver** (open modules + userspace → `nvidia-driver-beta`
+   artifact; best-effort, never blocks the pipeline).
 3. **build-rootfs** — debootstraps the userspace (compat libs + Wine included).
 4. **package .mlpds + live boot** — packages the OS as `.mlpds`, boots it under
    QEMU, captures screenshots, builds **both ISOs**, and publishes both
@@ -145,6 +156,29 @@ The ISO is a **live + installer** image. To put Deposit OS on real hardware:
    os-prober).
 4. Reboot into the installed disk. On first login you set your own password
    (the build ships a random one that is forced to change).
+
+## NVIDIA graphics (Beta)
+
+Deposit OS ships a **beta NVIDIA channel** built entirely in CI:
+
+1. After our kernel finishes compiling, `ci/build-nvidia.sh` clones NVIDIA's
+   official **open-gpu-kernel-modules** (default tag `550.107.02`, override
+   with `DEPOSIT_NVIDIA_VERSION`) and compiles them against the *exact* kernel
+   we ship — no dkms-on-target, no compiler needed on your machine.
+2. Matching userspace (GL, X driver, NVENC, Vulkan ICD, firmware) is pulled
+   as **unmodified Ubuntu 24.04 debs** from the archive.
+3. Everything lands in one `.mlpds` **driver package**:
+   `nvidia-driver-beta` on the Actions run. Install it inside Deposit OS:
+
+   ```bash
+   aqa install nvidia-beta.mlpds      # checksum + GPG verified
+   sudo reboot                        # then: nvidia-smi
+   ```
+
+**Scope / caveats:** Turing (GTX 16xx) and newer; x86_64; the kernel ABI is
+pinned to the exact Deposit OS release that built it — reinstall the package
+after every OS update until the updater grows driver hooks. The CI channel is
+unsigned unless a `DEPOSIT_GPG_PRIVATE_FILE` secret is configured.
 
 ## Ubuntu compatibility
 
@@ -306,18 +340,19 @@ via deposit-pkg). What the allowlist model *cannot* protect against:
   bubblewrap, but anything you whitelist *does* run with your user
   privileges. Whitelist deliberately.
 
-## Specifications (measured on Beta 0.1.1)
+## Specifications (measured on Beta 0.1.2)
 
 | Resource | Minimum | Recommended | Notes |
 |----------|---------|-------------|-------|
 | Architecture | x86_64 (amd64) | x86_64; ARM64 supported (UEFI — QEMU `virt`, Pi 4/5-class; [issue #1](https://github.com/wippsanrinthailand80-commits/deposit-os/issues/1)) |
 | RAM | 1 GB (desktop, light use) | 2 GB desktop · 4 GB with Wine/Waydroid | Idle-desktop footprint measured automatically in CI (`deposit-idle-metrics` artifact); 1 GB works for XFCE+browser-tab-light, not for heavy apps |
-| Storage | 8 GB | 16 GB+ | Installed system ≈ **0.9 GB** (measured: extracted rootfs 908 MB incl. kernel modules); ISO ≈ **434 MB**; rest is your apps, updates and package caches |
-| Graphics | VGA / any (boots headless too) | GPU with open drivers for Turbo + compositing | Compositor ON by default since Beta 0.1.1 |
+| Storage | 8 GB | 16 GB+ | Installed system ≈ **1.4 GB** (rootfs incl. kernel modules, Firefox, Wine, Thai fonts); rest is your apps, updates and package caches |
+| Graphics | VGA / any (boots headless too) | GPU with open drivers for Turbo + compositing · **NVIDIA Turing+ via beta `.mlpds`** | Compositor ON by default |
 | Network | optional | Ethernet or Wi‑Fi | |
 
-Download sizes you will actually see: `deposit-os.iso` ≈ 434 MB ·
-`deposit-arm64.img` ≈ 840–870 MB · `.mlpds` OS package ≈ 290 MB compressed.
+Download sizes you will actually see: `deposit-os.iso` ≈ 1.7 GB (full
+desktop + Wine + compat libs) · `deposit-arm64.img` ≈ 840–870 MB ·
+`nvidia-driver-beta.mlpds` ≈ 300 MB.
 
 ## Status & roadmap
 
@@ -343,9 +378,11 @@ tools/                 aqa, mlpds, deposit-turbo, deposit-quickmenu,
                        deposit-turbo-fx, deposit-security, deposit-store,
                        deposit-updater, deposit-oobe, deposit-install
 ci/                    make-disk.sh, make-iso.sh, make-arm64-image.sh,
-                       live-boot.sh, inject-autologin.sh, publish-release.sh,
-                       demo + render helpers
-assets/                logo, gear, wallpapers (andromeda/light/dark/abstract)
+                       live-boot.sh, build-nvidia.sh, inject-autologin.sh,
+                       publish-release.sh, demo + render helpers
+assets/                galaxy logo + wallpapers: andromeda-galaxy.jpg (login),
+                       sagittarius-a.jpg (desktop), SVG alternates,
+                       ATTRIBUTIONS.md (photo credits — keep with binaries)
 docs/assets/           screenshots used in this README
 ```
 
@@ -353,6 +390,10 @@ docs/assets/           screenshots used in this README
 
 GPL-3.0 — see [LICENSE](LICENSE). The OS bundles many upstream components
 (Linux kernel, glibc, XFCE, Wine, …) each under their own licenses.
+Wallpaper photographs are third-party works under CC BY (Andromeda: Adam
+Evans; Sagittarius A\*: EHT Collaboration) — attribution ships in
+[assets/ATTRIBUTIONS.md](assets/ATTRIBUTIONS.md) and must be kept with any
+redistribution.
 
 ## Contributing
 

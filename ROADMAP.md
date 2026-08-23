@@ -1,9 +1,28 @@
-# Deposit OS — Roadmap (Beta 0.1.1)
+# Deposit OS — Roadmap (Beta 0.1.2)
 
 Where we are, and what is honestly still missing. This file is the
 anti-vaporware contract: every claim here is checked against the tree.
 
-## Shipped (Beta 0.1.1) — verified in-tree & CI
+## Shipped (Beta 0.1.2) — verified in-tree & CI
+
+- **Everything from 0.1.1** below, plus:
+- **Galaxy brand**: real Andromeda photograph on the login screen (Adam
+  Evans, CC BY 2.0); Sagittarius A\* EHT image as the desktop wallpaper for
+  every new user (CC BY 4.0); redesigned spiral-galaxy `logo.svg` inherited
+  by panel/About/Plymouth; custom deep-space "deposit" boot splash derived
+  from spinner; attributions shipped in `assets/ATTRIBUTIONS.md`.
+- **NVIDIA (beta) channel**: `ci/build-nvidia.sh` compiles NVIDIA's OPEN
+  kernel modules against the exact CI-built kernel and bundles unmodified
+  Ubuntu userspace debs into one `.mlpds` driver package
+  (`nvidia-driver-beta` artifact, Turing+, x86_64). Best-effort step — can
+  never fail the main pipeline.
+- **Thai input proven in CI**: live-boot types `เพลงไทย` into YouTube's
+  search box via xdotool/XTEST and screenshots the results.
+- **CI screenshots rebuilt**: login-bypass single-boot flow, QMP ground-truth
+  capture with brightness-based hero selection (fb0 reads go dark under KMS
+  page-flipping — documented in `ci/live-boot.sh`).
+
+## Shipped (Beta 0.1.1)
 
 - **Kernel**: own Linux 6.6.58 from source; `broad` + `80m` fragments
   (KVM/VFIO, RDMA, CAN, EROFS/ZRAM, Thunderbolt, tracing, **Android Binder**

@@ -119,6 +119,21 @@ jobs:
         with:
           name: deposit-kernel
           path: build/output/kernel.tar
+      - name: build NVIDIA beta driver (.mlpds)
+        id: nvidia
+        continue-on-error: true
+        env:
+          DEPOSIT_GPG_PRIVATE_FILE: ${{ secrets.DEPOSIT_GPG_PRIVATE_FILE }}
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends dpkg-dev squashfs-tools gnupg
+          bash ci/build-nvidia.sh
+      - name: upload nvidia beta driver
+        if: steps.nvidia.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-driver-beta
+          path: build/output/nvidia-beta.mlpds
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
