@@ -52,16 +52,17 @@ VMLINUZ="$(ls "$KERNEL"/boot/vmlinuz-* 2>/dev/null | head -1)"
 [[ -n "$VMLINUZ" ]] || { echo "[live] no vmlinuz found"; exit 1; }
 echo "[live] kernel: $VMLINUZ"
 
-echo "[live] launching QEMU (TCG, VNC on :0, QMP on 4444)"
+echo "[live] launching QEMU (TCG, VNC on :0, QMP on 4444, serial -> /tmp/serial.log)"
 qemu-system-x86_64 \
   -name "Deposit OS" \
   -m 3072 -smp 2 -cpu max \
   -kernel "$VMLINUZ" \
-  -append "root=/dev/sda rw rootfstype=ext4 vga=791 console=tty0 console=ttyS0,115200n8" \
+  -append "root=/dev/sda rw rootfstype=ext4 console=tty0 console=ttyS0,115200n8 consoleblank=0" \
   -drive file="$OUT",format=raw,if=ide \
   -netdev user,id=n0 -device e1000,netdev=n0 \
   -vga std \
   -vnc :0 \
+  -serial file:/tmp/serial.log \
   -qmp tcp:127.0.0.1:4444,server,nowait \
   -daemonize
 
@@ -76,19 +77,36 @@ for t in "${times[@]}"; do
   prev=$t
   python3 ci/qmp_screendump.py "/tmp/shots/live-$i.png" 127.0.0.1 4444 || \
     echo "[live] screendump $i failed (vm may still be booting)"
+  # Keep the serial log growing into the shots dir so each artifact carries
+  # the full guest console up to this timestamp (diagnoses black frames).
+  cp /tmp/serial.log "/tmp/shots/serial-up-to-${t}s.log" 2>/dev/null || true
   echo "[live] captured live-$i.png at ${t}s"
   i=$((i + 1))
 done
 
 pkill -f qemu-system-x86_64 || true
+sleep 3
+cp /tmp/serial.log /tmp/shots/serial-final.log 2>/dev/null || \
+  echo "[live] WARNING: no serial log — guest produced no serial output"
 
 # Harvest the metrics the probe wrote into the image (persistent ext4).
 echo "[live] harvesting resource metrics from image"
-if MNT2="$(mktemp -d)" && sudo mount -o loop,ro "$OUT" "$MNT2" 2>/dev/null; then
-  sudo cp "$MNT2/var/log/deposit-metrics.txt" /tmp/deposit-metrics.txt 2>/dev/null || true
-  sudo chown "$(id -u):$(id -g)" /tmp/deposit-metrics.txt 2>/dev/null || true
-  sudo umount "$MNT2"; rmdir "$MNT2"
+MNT2="$(mktemp -d)"
+if sudo mount -o loop,ro "$OUT" "$MNT2"; then
+  if sudo ls -la "$MNT2/var/log/deposit-metrics.txt" 2>/dev/null; then
+    sudo cp "$MNT2/var/log/deposit-metrics.txt" /tmp/deposit-metrics.txt
+    sudo chown "$(id -u):$(id -g)" /tmp/deposit-metrics.txt
+    echo "[live] metrics harvested ✓"
+  else
+    echo "[live] WARNING: probe file missing inside image:"
+    sudo ls -la "$MNT2/var/log/" | tail -5 || true
+  fi
+  sudo ls -la "$MNT2/etc/systemd/system/graphical.target.wants/" 2>/dev/null | head -8 || true
+  sudo umount "$MNT2"
+else
+  echo "[live] ERROR: could not loop-mount image for harvest"
 fi
+rmdir "$MNT2" 2>/dev/null || true
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
-  || echo "[live] no metrics file (probe did not run?)"
+  || echo "[live] no metrics file (probe did not run? see warnings above)"
 echo "[live] done"

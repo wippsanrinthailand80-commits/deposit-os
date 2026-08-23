@@ -261,6 +261,7 @@ jobs:
           path: |
             /tmp/os-shot/os.png
             /tmp/shots/live-*.png
+            /tmp/shots/serial-*.log
           if-no-files-found: warn
 
       # ---- Build a bootable ISO and publish it to a continuous release ------
