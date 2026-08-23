@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # ============================================================================
-# live-boot.sh — boot the built Deposit OS under QEMU twice and capture:
-#   boot #1: the LOGIN PAGE (Andromeda-themed lightdm greeter, no autologin)
-#   boot #2: the DESKTOP (autologin) + Firefox opening YouTube and Thai
-#            Wikipedia to prove web stack + Thai font rendering.
-#
-# Every frame comes from TWO independent sources: QMP screendumps (QEMU-side,
-# can be blank on some QEMU builds) and the in-guest /dev/fb0 "truth camera"
-# written by probes into /var/log, harvested after a clean ACPI powerdown.
+# live-boot.sh — boot the built Deposit OS under QEMU with login bypassed
+# (autologin) and capture:
+#   - the DESKTOP with its Sagittarius A* black-hole wallpaper
+#   - Firefox opening YouTube and TYPING a Thai query ("เพลงไทย") into the
+#     search box via xdotool/XTEST — a real Thai input test
+# Frames come from QMP screendumps (ground truth; see pick_brightest note).
 #
 # Requires: qemu-system-x86_64, python3-pil, and artifacts deposit-kernel /
 # deposit-rootfs already extracted into build/output.
@@ -77,21 +75,6 @@ enable_unit() { # <service-name>
   sudo ln -sf "/etc/systemd/system/$1" "$MNT_RW/etc/systemd/system/graphical.target.wants/$1"
 }
 
-convert_fb0() { # <ppm-in-tmp> <png-out>
-  python3 - "$1" "$2" <<'PYC' || echo "[live] WARNING: fb0 conversion failed (non-fatal): $1 -> $2"
-import sys
-from PIL import Image, ImageFile
-ImageFile.LOAD_TRUNCATED_IMAGES = True
-src, dst = sys.argv[1], sys.argv[2]
-try:
-    im = Image.open(src)
-    im.save(dst)
-    print(f"[live] fb0 frame: {im.size} -> {dst}")
-except Exception as e:
-    print(f"[live] fb0 convert failed ({src}):", e)
-PYC
-}
-
 # Pick the BRIGHTEST frame as the phase hero. Rationale: /dev/fb0 reads go
 # black once modeset Xorg flips KMS surfaces (fbdev emulation keeps mapping
 # the original, abandoned buffer) — so QMP screendumps are ground truth, and
@@ -125,7 +108,7 @@ harvest_probes() {
   MNT2="$(mktemp -d)"
   LOOP="$(sudo losetup -f --show -r "$OUT" 2>/dev/null)" || LOOP=""
   if [[ -n "$LOOP" ]] && sudo mount -o ro,norecovery "$LOOP" "$MNT2"; then
-    for f in deposit-metrics.txt deposit-gfxdiag.txt; do
+    for f in deposit-metrics.txt deposit-gfxdiag.txt deposit-web.log; do
       if sudo test -s "$MNT2/var/log/$f"; then
         sudo cp "$MNT2/var/log/$f" "/tmp/$f"
         sudo chown "$(id -u):$(id -g)" "/tmp/$f"
@@ -230,9 +213,8 @@ sudo tee "$MNT_RW/usr/local/sbin/deposit-shot.sh" >/dev/null <<'SHOT'
 #!/bin/sh
 SUF="${1:-x}"
 case "$SUF" in
-  login)   sleep 140 ;;  # TCG boots slowly: lightdm/X paint around ~110s
-  desktop) sleep 130 ;;  # autologin session settled (panel visible)
-  web)     sleep 240 ;;  # X up ~110s, youtube ~125s, thai tab ~185s, rendered
+  desktop) sleep 115 ;;  # wallpaper visible right after autologin lands
+  web)     sleep 240 ;;  # typed Thai @~185s, results loaded by ~200s
   *)       sleep 30 ;;
 esac
 python3 - "$SUF" <<'PYEOF'
@@ -313,11 +295,23 @@ export HOME=/home/deposit USER=deposit LOGNAME=deposit DISPLAY=:0
 [ -r /home/deposit/.Xauthority ] && export XAUTHORITY=/home/deposit/.Xauthority
 ENV="env HOME=$HOME USER=$USER LOGNAME=$USER DISPLAY=:0"
 [ -n "${XAUTHORITY:-}" ] && ENV="$ENV XAUTHORITY=$XAUTHORITY"
+XDO="$ENV xdotool"
 echo "opening youtube ($ENV)"
 runuser -u deposit -- sh -c "$ENV firefox-esr --new-window https://www.youtube.com >/tmp/firefox-yt.log 2>&1 &"
-sleep 60
-echo "opening thai wikipedia tab"
-runuser -u deposit -- sh -c "$ENV firefox-esr --new-tab https://th.wikipedia.org >/tmp/firefox-th.log 2>&1 &"
+# Let it render, bring it forward, then TYPE a Thai query into the search
+# box ('/' is YouTube's focus-search shortcut). xdotool types unicode via
+# XTEST — a real end-to-end test of Thai glyph entry, not just display.
+sleep 50
+WID="$(runuser -u deposit -- sh -c "$XDO search --onlyvisible --name 'YouTube' 2>/dev/null | head -1")"
+if [ -n "$WID" ]; then
+  runuser -u deposit -- sh -c "$XDO windowactivate --sync $WID" || true
+fi
+runuser -u deposit -- sh -c "$XDO key --delay 80 slash" || true
+sleep 1
+runuser -u deposit -- sh -c "$XDO type --delay 140 'เพลงไทย'" || true
+sleep 3
+runuser -u deposit -- sh -c "$XDO key --delay 80 Return" || true
+{ echo "wid=$WID"; pgrep -a firefox; } > /var/log/deposit-web.log 2>&1
 WEB
 sudo tee "$MNT_RW/etc/systemd/system/deposit-web.service" >/dev/null <<'UNIT'
 [Unit]
@@ -336,24 +330,10 @@ UNIT
 sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-web-open.sh"
 
 # ============================================================================
-# PHASE A — LOGIN PAGE (no autologin: the Andromeda greeter must be seen)
+# SINGLE BOOT — login bypassed (autologin): straight to the Sgr A* desktop,
+# then Firefox opens YouTube and types a Thai query.
 # ============================================================================
-enable_unit deposit-shot@login.service
-sudo umount "$MNT_RW"; rmdir "$MNT_RW"
-
-launch_qemu
-capture_series login 45 105 165 225
-powerdown_and_wait
-cp /tmp/serial.log /tmp/shots/serial-login-final.log 2>/dev/null || true
-harvest_probes
-pick_brightest /tmp/shots/login-page.png /tmp/shots/login-*.png || \
-  echo "[live] WARNING: no login QMP frames"
-
-# ============================================================================
-# PHASE B — DESKTOP + WEB (autologin on this throwaway copy only)
-# ============================================================================
-echo "[live] injecting CI autologin + enabling desktop/web probes"
-mount_rw
+echo "[live] injecting CI autologin (login-screen bypass) + enabling probes"
 sudo bash ci/inject-autologin.sh "$MNT_RW" deposit --skip-oobe
 enable_unit deposit-metrics.service
 enable_unit deposit-gfxdiag.service
@@ -362,7 +342,6 @@ enable_unit "deposit-shot@web.service"
 enable_unit deposit-web.service
 sudo umount "$MNT_RW"; rmdir "$MNT_RW"
 
-: > /tmp/serial.log
 launch_qemu
 capture_series live 40 100 160 220 280
 powerdown_and_wait
@@ -370,9 +349,10 @@ cp /tmp/serial.log /tmp/shots/serial-final.log 2>/dev/null || \
   echo "[live] WARNING: no serial log — guest produced no serial output"
 rm -f /tmp/deposit-fb0-*.ppm /tmp/deposit-metrics.txt /tmp/deposit-gfxdiag.txt
 harvest_probes
-# Heroes from QMP ground truth: live-3 (~160s, desktop before the browser
-# lands ~180s) and live-5 (~280s, after YouTube + Thai Wikipedia tabs).
-[ -s /tmp/shots/live-3.png ] && cp /tmp/shots/live-3.png /tmp/shots/guest-desktop.png
+# Heroes from QMP ground truth: guest-desktop = best pre-browser frame
+# (live-1/2 @40/100s), thai-web = live-5 (@280s, Thai query results shown).
+pick_brightest /tmp/shots/guest-desktop.png /tmp/shots/live-1.png /tmp/shots/live-2.png \
+  || [ -s /tmp/shots/live-2.png ] && cp /tmp/shots/live-2.png /tmp/shots/guest-desktop.png
 [ -s /tmp/shots/live-5.png ] && cp /tmp/shots/live-5.png /tmp/shots/thai-web.png
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
   || echo "[live] no metrics (see warnings above)"

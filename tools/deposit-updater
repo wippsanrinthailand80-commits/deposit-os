@@ -82,6 +82,39 @@ class Updater(Gtk.Window):
         return False
 
 
+def self_check():
+    """Headless self-test: import + run() + Updater constructibility.
+    Returns (ok: bool, message: str). Never raises."""
+    try:
+        # 1. run() helper actually works.
+        r = run(["/bin/true"], timeout=10)
+        if r is None or r.returncode != 0:
+            return False, "run(/bin/true) did not succeed"
+
+        # 2. Updater class is constructible when a display is available.
+        #    If Gtk cannot init (no DISPLAY / no $DISPLAY server), skip
+        #    this assertion rather than fail — CI often has no display.
+        try:
+            Gtk.init()
+        except Exception:
+            return True, "run() ok; Updater construct skipped (no display)"
+
+        try:
+            _u = Updater()
+            _u.destroy()
+        except Exception as e:
+            return False, "Updater() failed: %s" % e
+
+        return True, "run() ok; Updater construct ok"
+    except Exception as e:
+        return False, "self_check exception: %s" % e
+
+
 if __name__ == "__main__":
+    import sys
+    if "--self-check" in sys.argv[1:]:
+        ok, msg = self_check()
+        print(msg)
+        sys.exit(0 if ok else 1)
     Updater()
     Gtk.main()

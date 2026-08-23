@@ -671,12 +671,17 @@ for wp in wallpaper-andromeda.svg wallpaper-light.svg wallpaper-dark.svg wallpap
 done
 # Also install as pixmaps for greeter fallback (Andromeda is the hero art)
 cp "$REPO_ROOT/assets/wallpaper-andromeda.svg" "$ROOTFS/usr/share/pixmaps/deposit-wallpaper.svg" 2>/dev/null || true
-# THE hero wallpaper: real Andromeda galaxy photograph (Adam Evans, CC BY 2.0
-# — see assets/ATTRIBUTIONS.md). Used by both the login screen and the XFCE
-# desktop via system-wide xfconf defaults below.
+# THE hero wallpaper (login): real Andromeda galaxy photograph (Adam Evans,
+# CC BY 2.0 — see assets/ATTRIBUTIONS.md).
 HERO_JPG="/usr/share/backgrounds/deposit/andromeda-galaxy.jpg"
 if [[ -f "$REPO_ROOT/assets/wallpaper-andromeda-galaxy.jpg" ]]; then
   cp "$REPO_ROOT/assets/wallpaper-andromeda-galaxy.jpg" "$ROOTFS$HERO_JPG"
+fi
+# THE desktop wallpaper: Sagittarius A* — the black hole at the center of
+# the Milky Way (Event Horizon Telescope Collaboration, CC BY 4.0).
+DESK_JPG="/usr/share/backgrounds/deposit/sagittarius-a.jpg"
+if [[ -f "$REPO_ROOT/assets/wallpaper-sagittarius-a.jpg" ]]; then
+  cp "$REPO_ROOT/assets/wallpaper-sagittarius-a.jpg" "$ROOTFS$DESK_JPG"
 fi
 # Pre-render the vector wallpaper to PNG as fallback. lightdm-gtk-greeter
 # loads images via gdk-pixbuf and CRASHES on SVG when librsvg's loader isn't
@@ -718,22 +723,21 @@ GREETER
 # crashed greeters on installs where librsvg's loader wasn't pulled in.
 # The XFCE desktop uses the same galaxy photo via xfconf defaults below.
 
-# System-wide XFCE desktop wallpaper for EVERY new user: the Andromeda
-# galaxy photo, zoomed. Without this, fresh accounts get the stock XFCE
-# backdrop instead of our brand.
+# System-wide XFCE desktop wallpaper for EVERY new user: Sagittarius A*,
+# the Milky Way's central black hole (zoomed). Login keeps Andromeda.
 mkdir -p "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
 cat > "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<XFD
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-desktop" version="1.0">
   <property name="backdrop" type="empty">
     <property name="single-workspace-number" type="int" value="0">
-      <property name="last-image" type="string" value="$HERO_JPG"/>
+      <property name="last-image" type="string" value="$DESK_JPG"/>
       <property name="image-style" type="int" value="5"/>
     </property>
     <property name="screen0" type="empty">
       <property name="monitor0" type="empty">
         <property name="image-style" type="int" value="5"/>
-        <property name="last-image" type="string" value="$HERO_JPG"/>
+        <property name="last-image" type="string" value="$DESK_JPG"/>
       </property>
     </property>
   </property>

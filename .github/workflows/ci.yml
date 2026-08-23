@@ -249,7 +249,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "![os mlpds](data:image/png;base64,$(base64 -w0 /tmp/os-shot/os.png))" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Deposit OS — live boot (login page, desktop, Thai web test)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deposit OS — live boot (Sgr A* desktop, Thai YouTube typing test)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           [ -s /tmp/shots/login-page.png ] && {
             echo "**Login page (in-guest framebuffer capture):**" >> "$GITHUB_STEP_SUMMARY"
