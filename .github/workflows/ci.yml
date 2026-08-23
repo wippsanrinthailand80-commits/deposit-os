@@ -250,6 +250,12 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Deposit OS — live boot (boot screen, GUI, AQA terminal)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          [ -s /tmp/shots/guest-desktop.png ] && {
+            echo "**In-guest framebuffer capture (ground truth):**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "![guest desktop](data:image/png;base64,$(base64 -w0 /tmp/shots/guest-desktop.png))" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          }
           for p in /tmp/shots/live-*.png; do
             [ -s "$p" ] || continue
             echo "![live $(basename "$p")](data:image/png;base64,$(base64 -w0 "$p"))" >> "$GITHUB_STEP_SUMMARY"
@@ -263,6 +269,7 @@ jobs:
           path: |
             /tmp/os-shot/os.png
             /tmp/shots/live-*.png
+            /tmp/shots/guest-desktop.png
             /tmp/shots/serial-*.log
           if-no-files-found: warn
 

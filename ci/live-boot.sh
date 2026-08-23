@@ -56,7 +56,27 @@ After=graphical.target lightdm.service
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 90; { echo "=== Deposit OS graphics diagnostics ==="; date -u; echo "-- modules dir --"; ls /lib/modules/$(uname -r)/ 2>&1 | head -6; echo "-- drm/tiny modules present? --"; ls /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/tiny/ 2>&1; echo "-- modprobe bochs --"; modprobe bochs 2>&1; echo "rc=$?"; echo "-- sysfs --"; ls /sys/class/drm/ 2>&1; ls /sys/class/graphics/ 2>&1; echo "-- lsmod (gpu) --"; lsmod | grep -E "bochs|cirrus|drm|ttm" || echo none; echo "-- dmesg drm --"; dmesg 2>/dev/null | grep -iE "drm|bochs|fbcon|framebuffer" | tail -15; echo "-- udevadm info VGA --"; udevadm info -q all -n /dev/dri/card0 2>&1 | head -5; udevadm info /sys/devices/pci0000:00/0000:00:02.0 2>&1 | grep -E "MODALIAS|DRIVER" ; echo "-- lightdm/X status --"; systemctl is-active lightdm; pgrep -a Xorg || echo "no Xorg process"; [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log; } > /var/log/deposit-gfxdiag.txt 2>&1'
+ExecStart=/bin/sh -c 'sleep 90; { echo "=== Deposit OS graphics diagnostics ==="; date -u; echo "-- modules dir --"; ls /lib/modules/$(uname -r)/ 2>&1 | head -6; echo "-- drm/tiny modules present? --"; ls /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/tiny/ 2>&1; echo "-- modprobe bochs --"; modprobe bochs 2>&1; echo "rc=$?"; echo "-- sysfs --"; ls /sys/class/drm/ 2>&1; ls /sys/class/graphics/ 2>&1; echo "-- lsmod (gpu) --"; lsmod | grep -E "bochs|cirrus|drm|ttm" || echo none; echo "-- dmesg drm --"; dmesg 2>/dev/null | grep -iE "drm|bochs|fbcon|framebuffer" | tail -15; echo "-- udevadm info VGA --"; udevadm info -q all -n /dev/dri/card0 2>&1 | head -5; udevadm info /sys/devices/pci0000:00/0000:00:02.0 2>&1 | grep -E "MODALIAS|DRIVER" ; echo "-- lightdm/X status --"; systemctl is-active lightdm; pgrep -a Xorg || echo "no Xorg process"; [ -f /var/log/Xorg.0.log ] && tail -20 /var/log/Xorg.0.log; echo "-- fb0 truth capture --"; python3 -c "
+import sys
+try:
+    vs=open('/sys/class/graphics/fb0/virtual_size').read().split(',')
+    w,h=int(vs[0]),int(vs[1])
+    bpp=int(open('/sys/class/graphics/fb0/bits_per_pixel').read())
+    print('fb0 %dx%d %dbpp' % (w,h,bpp))
+    if bpp != 32:
+        sys.exit(0)
+    d=open('/dev/fb0','rb').read()
+    row=w*4
+    o=open('/var/log/deposit-fb0.ppm','wb')
+    o.write(b'P6\n%d %d\n255\n'%(w,h))
+    for y in range(h):
+        r=d[y*row:y*row+w*4]
+        o.write(bytes((r[i+2],r[i+1],r[i]) for i in range(0,w*4,4)))
+    o.close()
+    print('wrote /var/log/deposit-fb0.ppm')
+except Exception as e:
+    print('fb0 capture failed:',e)
+" 2>&1; ls -la /var/log/deposit-fb0.ppm 2>&1; } > /var/log/deposit-gfxdiag.txt 2>&1'
 
 [Install]
 WantedBy=graphical.target
@@ -93,7 +113,7 @@ i=1
 for t in "${times[@]}"; do
   sleep $((t - prev))
   prev=$t
-  python3 ci/qmp_screendump.py "/tmp/shots/live-$i.png" 127.0.0.1 4444 || \
+  python3 ci/qmp_screendump.py "/tmp/shots/live-$i.png" 127.0.0.1 4444 --vnc-poke 5900 || \
     echo "[live] screendump $i failed (vm may still be booting)"
   # Keep the serial log growing into the shots dir so each artifact carries
   # the full guest console up to this timestamp (diagnoses black frames).
@@ -123,6 +143,18 @@ if [[ -n "$LOOP" ]] && sudo mount -o ro,norecovery "$LOOP" "$MNT2"; then
       echo "[live] WARNING: /var/log/$f missing or empty inside image"
     fi
   done
+  if sudo test -s "$MNT2/var/log/deposit-fb0.ppm"; then
+    sudo cp "$MNT2/var/log/deposit-fb0.ppm" /tmp/deposit-fb0.ppm
+    sudo chown "$(id -u):$(id -g)" /tmp/deposit-fb0.ppm
+    python3 - <<'PYC'
+from PIL import Image
+im = Image.open("/tmp/deposit-fb0.ppm")
+im.save("/tmp/shots/guest-desktop.png")
+print("[live] fb0 frame:", im.size, "-> /tmp/shots/guest-desktop.png")
+PYC
+  else
+    echo "[live] WARNING: no fb0 frame inside image"
+  fi
   sudo umount "$MNT2"
 else
   echo "[live] ERROR: could not loop-mount image read-only for harvest"
