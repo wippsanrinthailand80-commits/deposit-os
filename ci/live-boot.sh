@@ -164,7 +164,7 @@ sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-metrics-probe.sh"
 # --- graphics diagnostics + generic fb0 truth camera ------------------------
 sudo tee "$MNT_RW/usr/local/sbin/deposit-gfxdiag.sh" >/dev/null <<'GFX'
 #!/bin/sh
-sleep 90
+sleep 150
 {
   echo "=== Deposit OS graphics diagnostics ==="; date -u
   echo "-- modules dir --"; ls /lib/modules/$(uname -r)/ 2>&1 | head -6
@@ -203,9 +203,9 @@ sudo tee "$MNT_RW/usr/local/sbin/deposit-shot.sh" >/dev/null <<'SHOT'
 #!/bin/sh
 SUF="${1:-x}"
 case "$SUF" in
-  login)   sleep 45 ;;   # greeter fully painted
-  desktop) sleep 40 ;;   # xfce panel up, before browser covers screen
-  web)     sleep 150 ;;  # youtube opened @55s, thai wiki tab @115s, loaded
+  login)   sleep 140 ;;  # TCG boots slowly: lightdm/X paint around ~110s
+  desktop) sleep 130 ;;  # autologin session settled (panel visible)
+  web)     sleep 240 ;;  # X up ~110s, youtube ~125s, thai tab ~185s, rendered
   *)       sleep 30 ;;
 esac
 python3 - "$SUF" <<'PYEOF'
@@ -272,7 +272,16 @@ sudo chmod +x "$MNT_RW/usr/local/sbin/deposit-shot.sh"
 # --- browser choreography (YouTube -> Thai Wikipedia tab) --------------------
 sudo tee "$MNT_RW/usr/local/sbin/deposit-web-open.sh" >/dev/null <<'WEB'
 #!/bin/sh
-sleep 55
+# Wait for the graphical session (TCG boots slowly; fixed sleeps are fragile)
+i=0
+while [ $i -lt 100 ]; do
+  if pgrep -x Xorg >/dev/null 2>&1 && [ -S /tmp/.X11-unix/X0 ]; then
+    break
+  fi
+  sleep 3
+  i=$((i+1))
+done
+sleep 10
 export HOME=/home/deposit USER=deposit LOGNAME=deposit DISPLAY=:0
 [ -r /home/deposit/.Xauthority ] && export XAUTHORITY=/home/deposit/.Xauthority
 ENV="env HOME=$HOME USER=$USER LOGNAME=$USER DISPLAY=:0"
