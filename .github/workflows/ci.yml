@@ -269,7 +269,7 @@ jobs:
             echo "![thai web](data:image/png;base64,$(base64 -w0 /tmp/shots/thai-web.png))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           }
-          for p in /tmp/shots/live-*.png; do
+          for p in /tmp/shots/login-*.png /tmp/shots/live-*.png; do
             [ -s "$p" ] || continue
             echo "![live $(basename "$p")](data:image/png;base64,$(base64 -w0 "$p"))" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -282,6 +282,7 @@ jobs:
           path: |
             /tmp/os-shot/os.png
             /tmp/shots/login-page.png
+            /tmp/shots/login-*.png
             /tmp/shots/live-*.png
             /tmp/shots/guest-desktop.png
             /tmp/shots/thai-web.png

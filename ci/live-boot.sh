@@ -92,6 +92,33 @@ except Exception as e:
 PYC
 }
 
+# Pick the BRIGHTEST frame as the phase hero. Rationale: /dev/fb0 reads go
+# black once modeset Xorg flips KMS surfaces (fbdev emulation keeps mapping
+# the original, abandoned buffer) — so QMP screendumps are ground truth, and
+# early dumps may still be boot-console black. Brightness = content here.
+pick_brightest() { # <output.png> <input.png>...
+  python3 - "$@" <<'PYP'
+import sys
+from PIL import Image, ImageStat
+args = sys.argv[1:]
+dst, cands = args[0], args[1:]
+best, best_b = None, -1.0
+for p in cands:
+    try:
+        b = sum(ImageStat.Stat(Image.open(p).convert("L")).mean)
+        if b > best_b:
+            best, best_b = p, b
+    except Exception as e:
+        print(f"[live] skip {p}: {e}")
+if best:
+    import shutil
+    shutil.copyfile(best, dst)
+    print(f"[live] hero {dst} <- {best} (brightness {best_b:.1f})")
+else:
+    print(f"[live] WARNING: no usable candidate for {dst}")
+PYP
+}
+
 harvest_probes() {
   echo "[live] harvesting probe outputs from image"
   local MNT2 LOOP f
@@ -319,8 +346,8 @@ capture_series login 45 105 165 225
 powerdown_and_wait
 cp /tmp/serial.log /tmp/shots/serial-login-final.log 2>/dev/null || true
 harvest_probes
-[ -s /tmp/deposit-fb0-login.ppm ] && convert_fb0 /tmp/deposit-fb0-login.ppm /tmp/shots/login-page.png \
-  || echo "[live] WARNING: no login fb0 frame this phase"
+pick_brightest /tmp/shots/login-page.png /tmp/shots/login-*.png || \
+  echo "[live] WARNING: no login QMP frames"
 
 # ============================================================================
 # PHASE B — DESKTOP + WEB (autologin on this throwaway copy only)
@@ -343,10 +370,10 @@ cp /tmp/serial.log /tmp/shots/serial-final.log 2>/dev/null || \
   echo "[live] WARNING: no serial log — guest produced no serial output"
 rm -f /tmp/deposit-fb0-*.ppm /tmp/deposit-metrics.txt /tmp/deposit-gfxdiag.txt
 harvest_probes
-[ -s /tmp/deposit-fb0-desktop.ppm ] && convert_fb0 /tmp/deposit-fb0-desktop.ppm /tmp/shots/guest-desktop.png \
-  || echo "[live] WARNING: no desktop fb0 frame this phase"
-[ -s /tmp/deposit-fb0-web.ppm ] && convert_fb0 /tmp/deposit-fb0-web.ppm /tmp/shots/thai-web.png \
-  || echo "[live] WARNING: no web fb0 frame this phase"
+# Heroes from QMP ground truth: live-3 (~160s, desktop before the browser
+# lands ~180s) and live-5 (~280s, after YouTube + Thai Wikipedia tabs).
+[ -s /tmp/shots/live-3.png ] && cp /tmp/shots/live-3.png /tmp/shots/guest-desktop.png
+[ -s /tmp/shots/live-5.png ] && cp /tmp/shots/live-5.png /tmp/shots/thai-web.png
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
   || echo "[live] no metrics (see warnings above)"
 echo "[live] done"
