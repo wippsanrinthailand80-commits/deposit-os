@@ -149,10 +149,29 @@ chroot "$ROOTFS" /bin/bash -c '
   apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_EXTRA_BASE"'
 '
 if [[ -n "${DEPOSIT_DESKTOP_PKGS:-}" ]]; then
+  # Firefox comes from Mozilla's official APT repo: Ubuntu noble only offers
+  # the snap transitional package, which cannot work in our rootfs layout.
+  # Repo setup is best-effort — if the keyring fetch fails, apt simply skips
+  # firefox and the build continues (browser is a nicety, not a hard dep).
+  if mkdir -p "$ROOTFS/etc/apt/keyrings" "$ROOTFS/etc/apt/sources.list.d" "$ROOTFS/etc/apt/preferences.d" && \
+     wget -q --timeout=60 https://packages.mozilla.org/apt/repo-signing-key.gpg \
+       -O "$ROOTFS/etc/apt/keyrings/packages.mozilla.org.asc" 2>/dev/null; then
+    echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
+      > "$ROOTFS/etc/apt/sources.list.d/mozilla.list"
+    cat > "$ROOTFS/etc/apt/preferences.d/mozilla" <<'PIN'
+Package: *
+Pin: origin packages.mozilla.org
+Pin-Priority: 1000
+PIN
+    echo "mozilla apt repo staged for firefox install"
+  else
+    echo "WARNING: could not fetch Mozilla signing key — no browser this build"
+  fi
   chroot "$ROOTFS" /bin/bash -c '
     set -e
     export DEBIAN_FRONTEND=noninteractive
     export APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180 -o Acquire::https::Timeout=180"
+    apt-get $APT_OPTS update -qq
     apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_DESKTOP_PKGS"'
   '
 fi
