@@ -14,7 +14,7 @@ ROOTFS="$REPO/build/output/rootfs"
 OUT="$REPO/build/output/deposit-disk.img"
 
 echo "[live] building disk image"
-bash ci/make-disk.sh "$ROOTFS" "$KERNEL" "$OUT" 4096
+bash ci/make-disk.sh "$ROOTFS" "$KERNEL" "$OUT" 8192
 
 # CI-ONLY: enable autologin on a throwaway copy of the disk so the screenshot
 # reaches the desktop. The shipped .mlpds installer keeps a real login screen.
@@ -94,15 +94,38 @@ try:
     print('fb0 %dx%d %dbpp' % (w, h, bpp))
     if bpp != 32:
         print('skipping capture: need 32bpp'); sys.exit(0)
-    d = open('/dev/fb0', 'rb').read()
-    row = w * 4
+    try:
+        stride = int(open('/sys/class/graphics/fb0/stride').read())
+    except Exception:
+        stride = w * 4
+    need = stride * h
+    f = open('/dev/fb0', 'rb')
+    parts = []
+    got = 0
+    while got < need:
+        c = f.read(need - got)
+        if not c:
+            break
+        parts.append(c)
+        got += len(c)
+    d = b''.join(parts)
+    print('read %d of %d bytes from /dev/fb0' % (len(d), need))
     o = open('/var/log/deposit-fb0.ppm', 'wb')
     o.write(b'P6\n%d %d\n255\n' % (w, h))
+    rowbuf = bytearray(w * 3)
+    rows_ok = 0
     for y in range(h):
-        r = d[y*row:y*row+w*4]
-        o.write(bytes((r[i+2], r[i+1], r[i]) for i in range(0, w*4, 4)))
+        r = d[y*stride:y*stride + w*4]
+        if len(r) < w*4:
+            break
+        # BGRA/X in memory -> RGB, via strided slices (no per-pixel loop)
+        rowbuf[0::3] = r[2::4]
+        rowbuf[1::3] = r[1::4]
+        rowbuf[2::3] = r[0::4]
+        o.write(rowbuf)
+        rows_ok += 1
     o.close()
-    print('wrote /var/log/deposit-fb0.ppm')
+    print('wrote /var/log/deposit-fb0.ppm (%d/%d rows)' % (rows_ok, h))
 except Exception as e:
     print('fb0 capture failed:', e)
 PYEOF
@@ -196,11 +219,15 @@ if [[ -n "$LOOP" ]] && sudo mount -o ro,norecovery "$LOOP" "$MNT2"; then
   if sudo test -s "$MNT2/var/log/deposit-fb0.ppm"; then
     sudo cp "$MNT2/var/log/deposit-fb0.ppm" /tmp/deposit-fb0.ppm
     sudo chown "$(id -u):$(id -g)" /tmp/deposit-fb0.ppm
-    python3 - <<'PYC'
-from PIL import Image
-im = Image.open("/tmp/deposit-fb0.ppm")
-im.save("/tmp/shots/guest-desktop.png")
-print("[live] fb0 frame:", im.size, "-> /tmp/shots/guest-desktop.png")
+    python3 - <<'PYC' || echo "[live] WARNING: fb0 conversion failed (non-fatal)"
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+try:
+    im = Image.open("/tmp/deposit-fb0.ppm")
+    im.save("/tmp/shots/guest-desktop.png")
+    print("[live] fb0 frame:", im.size, "-> /tmp/shots/guest-desktop.png")
+except Exception as e:
+    print("[live] fb0 convert failed:", e)
 PYC
   else
     echo "[live] WARNING: no fb0 frame inside image"
