@@ -753,7 +753,14 @@ XFD
 # connected output right after login, then pokes xfdesktop to repaint.
 sudo tee "$ROOTFS/usr/local/sbin/deposit-set-wallpaper.sh" >/dev/null <<'WALL'
 #!/bin/sh
-sleep 3
+# Wait for the session's xfconf daemon first: under TCG emulation the whole
+# session takes tens of seconds to come up, and a fixed sleep fires way too
+# early (run #108 wrote nothing — xfdesktop's own empty placeholders won).
+i=0
+until xfconf-query -c xfce4-desktop -l >/dev/null 2>&1; do
+  i=$((i+1)); [ "$i" -gt 90 ] && exit 0
+  sleep 2
+done
 IMG_DESK=/usr/share/backgrounds/deposit/sagittarius-a.jpg
 [ -f "$IMG_DESK" ] || exit 0
 set_bg(){ xfconf-query -c xfce4-desktop -p "$1" -t string -s "$2" --create >/dev/null 2>&1 || true; }
@@ -766,6 +773,7 @@ for M in $MONS monitor0; do
   set_bg "/backdrop/screen0/$M/last-image" "$IMG_DESK"
   set_style "/backdrop/screen0/$M/image-style"
 done
+sleep 2
 pkill -HUP xfdesktop 2>/dev/null || true
 WALL
 chmod +x "$ROOTFS/usr/local/sbin/deposit-set-wallpaper.sh"

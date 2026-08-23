@@ -195,7 +195,10 @@ sleep 150
   grep -h "last-image\|image-style" \
     /home/deposit/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null \
     || echo "no user xfconf backdrop written yet"
+  echo "-- wallpaper assets + enforcer --"
   ls -la /usr/share/backgrounds/deposit/ 2>&1
+  ls -la /usr/local/sbin/deposit-set-wallpaper.sh /etc/xdg/autostart/deposit-wallpaper.desktop 2>&1
+  pgrep -a -f "xfconfd|xfdesktop|deposit-set-wallpaper" || true
 } > /var/log/deposit-gfxdiag.txt 2>&1
 GFX
 sudo tee "$MNT_RW/etc/systemd/system/deposit-gfxdiag.service" >/dev/null <<'UNIT'
