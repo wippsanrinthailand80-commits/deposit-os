@@ -125,6 +125,9 @@ jobs:
         env:
           DEPOSIT_GPG_PRIVATE_FILE: ${{ secrets.DEPOSIT_GPG_PRIVATE_FILE }}
         run: |
+          # kernel build steps run under sudo -> build/output is root-owned;
+          # the unprivileged pack step otherwise can't write the .mlpds (#113)
+          sudo chown -R "$(id -u):$(id -g)" build/output 2>/dev/null || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends dpkg-dev squashfs-tools gnupg
           bash ci/build-nvidia.sh
