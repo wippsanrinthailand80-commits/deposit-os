@@ -805,20 +805,18 @@ set_bg(){ xfconf-query -c xfce4-desktop -p "$1" -t string -s "$2" --create >/dev
 set_style(){ xfconf-query -c xfce4-desktop -p "$1" -t int -s 5 --create >/dev/null 2>&1 || true; }
 MONS="$(xrandr --query 2>/dev/null | awk '/ connected/{print $1}')"
 [ -z "$MONS" ] && MONS="Virtual-1 monitor0"
+# xfdesktop >= 4.14 reads PER-MONITOR keys as "monitor<NAME>" (e.g.
+# monitorVirtual-1); older builds used the bare name. Run #118 proved the
+# bare form is ignored -> default xfce-shapes.svg was painted instead.
+# Write BOTH forms for every output plus the generic fallbacks.
 for M in $MONS monitor0; do
-  for W in workspace0 workspace1 workspace2 workspace3; do
-    set_bg "/backdrop/screen0/$M/$W/last-image" "$IMG_DESK"
-    set_style "/backdrop/screen0/$M/$W/image-style"
-  done
-  set_bg "/backdrop/screen0/$M/last-image" "$IMG_DESK"
-  set_style "/backdrop/screen0/$M/image-style"
-done
-# nuke any stale default-wallpaper entries so nothing shadows ours
-xfconf-query -c xfce4-desktop -p /backdrop -r -R >/dev/null 2>&1 || true
-for M in $MONS monitor0; do
-  for W in workspace0 workspace1 workspace2 workspace3; do
-    set_bg "/backdrop/screen0/$M/$W/last-image" "$IMG_DESK"
-    set_style "/backdrop/screen0/$M/$W/image-style"
+  for KEY in "$M" "monitor$M"; do
+    for W in workspace0 workspace1 workspace2 workspace3; do
+      set_bg "/backdrop/screen0/$KEY/$W/last-image" "$IMG_DESK"
+      set_style "/backdrop/screen0/$KEY/$W/image-style"
+    done
+    set_bg "/backdrop/screen0/$KEY/last-image" "$IMG_DESK"
+    set_style "/backdrop/screen0/$KEY/image-style"
   done
 done
 sleep 2
