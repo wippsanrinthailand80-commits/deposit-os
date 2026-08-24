@@ -62,4 +62,14 @@ if (( SKIP_OOBE )); then
   echo "[autologin] OOBE sentinel set — setup wizard will self-skip (CI copy only)"
 fi
 
+# Live-session convenience: passwordless sudo so the disk installer (and any
+# admin GUI) can elevate from the autologged-in session. LIVE ONLY — the
+# installer deletes /etc/sudoers.d/50-deposit-live when writing to disk.
+mkdir -p "$MNT/etc/sudoers.d"
+cat > "$MNT/etc/sudoers.d/50-deposit-live" <<SUD
+# Deposit live session: $USER may administer without a password.
+$USER ALL=(ALL) NOPASSWD:ALL
+SUD
+chmod 0440 "$MNT/etc/sudoers.d/50-deposit-live"
+
 echo "[autologin] enabled for $USER at $MNT"

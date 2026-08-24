@@ -176,6 +176,18 @@ PIN
   '
 fi
 
+# --- Stage 3a-2: disk installer toolchain (offline install support) ----------
+# GRUB binaries for BOTH boot modes are preinstalled in the live fs so the
+# installer never needs network access on the target machine.
+if [[ -n "${DEPOSIT_INSTALLER_PKGS:-}" ]]; then
+  chroot "$ROOTFS" /bin/bash -c '
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    export APT_OPTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=180 -o Acquire::https::Timeout=180"
+    apt-get $APT_OPTS install -y --no-install-recommends '"$DEPOSIT_INSTALLER_PKGS"'
+  '
+fi
+
 # --- Stage 3b: Ubuntu compat libs (jammy/focal .debs on noble) ---------------
 # Path 1 delivers "almost 100% installer compat" for runtime: jammy/focal
 # binaries linked against older sonames (libicu70/66, libssl1.1, libffi7)
@@ -276,6 +288,32 @@ mkdir -p "$ROOTFS/usr/local/bin" "$ROOTFS/etc/deposit" "$ROOTFS/usr/share/deposi
 cp "$REPO_ROOT/tools/aqa"        "$ROOTFS/usr/local/bin/aqa"
 cp "$REPO_ROOT/tools/deposit-turbo" "$ROOTFS/usr/local/bin/deposit-turbo"
 chmod +x "$ROOTFS/usr/local/bin/aqa" "$ROOTFS/usr/local/bin/deposit-turbo"
+
+# --- Disk installer (Plan 1A): real committed script -> image -----------------
+# Lives at ci/deposit-installer.sh in the repo; copied verbatim onto the
+# system (lesson from run #112: never runtime-generate critical files).
+install -Dm0755 "$REPO_ROOT/ci/deposit-installer.sh" \
+  "$ROOTFS/usr/sbin/deposit-installer"
+cat > "$ROOTFS/usr/share/applications/deposit-installer.desktop" <<DESKF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Install Deposit OS
+Name[th]=ติดตั้ง Deposit OS
+GenericComment=Install the running live system to a disk
+Exec=xterm -title "Deposit OS Installer" -e /usr/sbin/deposit-installer
+Icon=deposit-logo
+Categories=System;Utility;
+Terminal=false
+NoDisplay=false
+DESKF
+# Shortcut on the live user's desktop (NOT in /etc/skel — an installed
+# system should not offer "Install" to every new user).
+mkdir -p "$ROOTFS/home/$DEPOSIT_DEFAULT_USER/Desktop"
+cp "$ROOTFS/usr/share/applications/deposit-installer.desktop" \
+   "$ROOTFS/home/$DEPOSIT_DEFAULT_USER/Desktop/"
+chroot "$ROOTFS" chown -R "$DEPOSIT_DEFAULT_USER:$DEPOSIT_DEFAULT_USER" \
+  "/home/$DEPOSIT_DEFAULT_USER/Desktop" 2>/dev/null || true
 
 # Trusted public key used to verify GPG signatures on .mlpds packages.
 cp "$REPO_ROOT/assets/deposit-signing-key.pub.asc" "$ROOTFS/usr/share/deposit/deposit-signing-key.pub.asc" 2>/dev/null \

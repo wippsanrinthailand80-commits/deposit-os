@@ -68,6 +68,10 @@ DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm light
   breeze-gtk-theme breeze-cursor-theme accountsservice firefox fonts-thai-tlwg xdotool \
   librsvg2-common}"
 
+# Packages needed ON THE LIVE SYSTEM to run the disk installer offline.
+DEPOSIT_INSTALLER_PKGS="${DEPOSIT_INSTALLER_PKGS:-whiptail xterm rsync dosfstools \
+  grub2-common grub-efi-amd64-bin grub-pc-bin}"
+
 # --- Windows-friendly layer (Beta 0.1.0.8+) ---------------------------------
 # Wine lets users run Windows installers (.exe/.msi) directly; ntfs-3g gives
 # reliable read/write on Windows drives (kernel ntfs3 module also present);
