@@ -95,24 +95,10 @@ rm -rf "$PAYLOAD/DEBIAN" 2>/dev/null || true
 log "payload staged ($(du -sh "$PAYLOAD" | cut -f1))"
 
 # --- 4. Package --------------------------------------------------------------
-cat > "$REPO/ci/nvidia-installer/install.sh" <<'INST'
-#!/usr/bin/env bash
-# NVIDIA beta driver installer payload — copies the staged tree onto the
-# target root and regenerates module dependencies.
-set -euo pipefail
-T="${2:-}"
-while [[ $# -gt 0 ]]; do case "$1" in
-  --target) T="$2"; shift 2 ;;
-  *) shift ;;
-esac; done
-[[ -n "$T" && -d "$T" ]] || { echo "install.sh: need --target DIR" >&2; exit 2; }
-SRC="$(cd "$(dirname "$0")/.." && pwd)"
-find "$SRC" -mindepth 1 -maxdepth 1 ! -name installer -exec cp -a {} "$T"/ \;
-KREL="$(cat "$T/KERNEL_RELEASE")"
-depmod -b "$T" "$KREL"
-echo "[nvidia-installer] modules + userspace installed for $KREL"
-echo "[nvidia-installer] reboot to activate; verify with: nvidia-smi"
-INST
+# install.sh lives in the repo at ci/nvidia-installer/ (run #112 failed on CI
+# because the dir was runtime-generated into a path that didn't exist there).
+[[ -f "$REPO/ci/nvidia-installer/install.sh" ]] || fail "ci/nvidia-installer/install.sh missing from repo"
+chmod +x "$REPO/ci/nvidia-installer/install.sh"
 
 command -v squashfs-tools >/dev/null 2>&1 || true
 log "packing .mlpds (driver)"
