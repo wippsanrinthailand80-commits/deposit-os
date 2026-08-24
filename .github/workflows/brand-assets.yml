@@ -1,0 +1,29 @@
+# Generates the Andromeda photo-cutout logo (same recipe as build-rootfs)
+# without needing a full distro build. Run manually: gh workflow run brand-assets.yml
+name: brand-assets
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  logo:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: cut the galaxy out of the photo
+        run: |
+          convert assets/wallpaper-andromeda-galaxy.jpg \
+                  -colorspace gray -level 2%,45% /tmp/alpha.png
+          convert assets/wallpaper-andromeda-galaxy.jpg /tmp/alpha.png \
+                  -alpha off -compose CopyOpacity -composite \
+                  -trim +repage -resize 512x512 \
+                  -background none -gravity center -extent 512x512 \
+                  deposit-logo.png
+          identify deposit-logo.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deposit-logo
+          path: deposit-logo.png
