@@ -822,7 +822,14 @@ for M in $MONS monitor0; do
   done
 done
 sleep 2
-pkill -HUP xfdesktop 2>/dev/null || true
+# DO NOT pkill -HUP xfdesktop: SIGHUP terminates GUI apps (run #115 — config
+# was perfect, then the enforcer killed the renderer -> black desktop).
+# xfconf writes above are applied live over dbus; SIGUSR1 asks xfdesktop to
+# re-read the backdrop if a nudge is ever needed, and we resurrect it just
+# in case it died for another reason.
+pkill -USR1 -x xfdesktop 2>/dev/null || true
+pgrep -x xfdesktop >/dev/null 2>&1 || \
+  ( DISPLAY="${DISPLAY:-:0}" nohup xfdesktop >/dev/null 2>&1 & )
 WALL
 chmod +x "$ROOTFS/usr/local/sbin/deposit-set-wallpaper.sh"
 mkdir -p "$ROOTFS/etc/xdg/autostart"
