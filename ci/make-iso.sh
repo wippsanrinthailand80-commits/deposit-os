@@ -59,11 +59,43 @@ cp "$ROOTFS/boot/vmlinuz-$VER" "$WORK/live/vmlinuz" 2>/dev/null \
   || cp "$ROOTFS"/boot/vmlinuz-* "$WORK/live/vmlinuz"
 cp "$ROOTFS/boot/initrd.img-$VER" "$WORK/live/initrd.img" 2>/dev/null || true
 
-# 4) GRUB config (live-boot boots the squashfs)
+# 4) GRUB config (live-boot boots the squashfs) — deep-space boot menu
 mkdir -p "$WORK/boot/grub"
+if [[ -f assets/wallpaper-sagittarius-a.jpg ]]; then
+  mkdir -p "$WORK/boot/grub/themes/deposit"
+  cp assets/wallpaper-sagittarius-a.jpg "$WORK/boot/grub/themes/deposit/bg.jpg"
+  cat > "$WORK/boot/grub/themes/deposit/theme.txt" <<'THEME'
+desktop-image: "bg.jpg"
+desktop-image-scale-method: cropped
+title-color: "#cfc8ff"
++ boot_menu {
+  left = 20%
+  top = 42%
+  width = 60%
+  height = 28%
+  item_color = "#b9b2e8"
+  selected_item_color = "#ffcf7a"
+  item_height = 32
+  item_padding = 6
+}
++ label {
+  top = 92%
+  left = 2%
+  width = 96%
+  align = center
+  color = "#8f86d8"
+  text = "Deposit OS — Sagittarius A* at the heart of the Milky Way"
+}
+THEME
+fi
 cat > "$WORK/boot/grub/grub.cfg" <<EOF
 set timeout=5
 insmod all_video
+insmod jpeg
+if [ -f /boot/grub/themes/deposit/theme.txt ]; then
+  set theme=/boot/grub/themes/deposit/theme.txt
+  terminal_output gfxterm
+fi
 menuentry "Deposit OS (Live)" {
   linux /live/vmlinuz boot=live quiet splash console=ttyS0,115200n8
   initrd /live/initrd.img

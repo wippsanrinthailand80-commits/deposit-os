@@ -701,6 +701,27 @@ cp "$REPO_ROOT/assets/logo.svg"              "$ROOTFS/usr/share/pixmaps/deposit-
 cp "$REPO_ROOT/assets/gear.svg"               "$ROOTFS/usr/share/pixmaps/deposit-gear.svg"
 cp "$REPO_ROOT/assets/deposit-turbo.svg"      "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-turbo.svg"
 cp "$REPO_ROOT/assets/logo.svg"               "$ROOTFS/usr/share/icons/hicolor/scalable/apps/deposit-logo.svg"
+
+# --- Brand logo: the REAL Andromeda photo, sky removed -----------------------
+# The logo IS the galaxy: a luminance->alpha cutout of the actual photograph
+# (Adam Evans, CC BY 2.0) — black space turns transparent, the faint outer
+# disc fades smoothly, leaving galaxy + companions. Needs ImageMagick, so it
+# is generated here at build time; the vector SVG remains as fallback.
+LOGO_SRC="$REPO_ROOT/assets/wallpaper-andromeda-galaxy.jpg"
+LOGO_PNG="$ROOTFS/usr/share/pixmaps/deposit-logo.png"
+if command -v convert >/dev/null 2>&1 && [[ -f "$LOGO_SRC" ]]; then
+  convert "$LOGO_SRC" -colorspace gray -level 2%,45% "$ROOTFS/.logo-alpha.png"
+  if convert "$LOGO_SRC" "$ROOTFS/.logo-alpha.png" -alpha off \
+       -compose CopyOpacity -composite -trim +repage -resize 512x512 \
+       -background none -gravity center -extent 512x512 "$LOGO_PNG"; then
+    echo "[rootfs] Andromeda photo cutout logo: $(du -h "$LOGO_PNG" | cut -f1)"
+  fi
+  rm -f "$ROOTFS/.logo-alpha.png"
+fi
+if [[ -f "$LOGO_PNG" ]]; then
+  mkdir -p "$ROOTFS/usr/share/icons/hicolor/512x512/apps"
+  cp "$LOGO_PNG" "$ROOTFS/usr/share/icons/hicolor/512x512/apps/deposit-logo.png"
+fi
 # Beta wallpapers — Andromeda (hero), light/dark/abstract alternates
 for wp in wallpaper-andromeda.svg wallpaper-light.svg wallpaper-dark.svg wallpaper-abstract.svg; do
   if [[ -f "$REPO_ROOT/assets/$wp" ]]; then
@@ -841,9 +862,12 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 DESKF
 
-# Plymouth watermark: rasterize the galaxy logo properly (the old build
-# copied raw SVG bytes into a .png filename, which plymouth can't render).
-if command -v rsvg-convert >/dev/null 2>&1 && [[ -f "$ROOTFS/usr/share/pixmaps/deposit-logo.svg" ]]; then
+# Plymouth watermark: prefer the photo cutout logo; fall back to rasterizing
+# the vector (never raw SVG bytes — plymouth can't render those).
+if [[ -f "$ROOTFS/usr/share/pixmaps/deposit-logo.png" ]]; then
+  cp "$ROOTFS/usr/share/pixmaps/deposit-logo.png" \
+     "$ROOTFS/usr/share/plymouth/themes/spinner/watermark.png"
+elif command -v rsvg-convert >/dev/null 2>&1 && [[ -f "$ROOTFS/usr/share/pixmaps/deposit-logo.svg" ]]; then
   rsvg-convert -w 256 -h 256 "$ROOTFS/usr/share/pixmaps/deposit-logo.svg" \
     -o "$ROOTFS/usr/share/plymouth/themes/spinner/watermark.png" || true
 fi
@@ -861,7 +885,36 @@ if [[ -f "$SP_PLY/spinner.plymouth" ]]; then
   sed -i 's/^Name=.*/Name=Deposit OS/' "$DP_PLY/deposit.plymouth"
   grep -q '^BackgroundStartColor=' "$DP_PLY/deposit.plymouth" || \
     printf 'BackgroundStartColor=0x0a0630\nBackgroundEndColor=0x1b1040\n' >> "$DP_PLY/deposit.plymouth"
+  # accretion-orange progress ring: hue-shift the spinner frames
+  # (hue +180 deg turns the stock blue ring to orange around our galaxy)
+  if command -v mogrify >/dev/null 2>&1; then
+    find "$DP_PLY" -maxdepth 1 -name '*.png' ! -name 'watermark*' ! -name 'bg*' \
+      -exec mogrify -modulate 100,105,200 {} \; 2>/dev/null || true
+    echo "[rootfs] plymouth ring hue-shifted to orange"
+  fi
   chroot "$ROOTFS" plymouth-set-default-theme deposit 2>/dev/null || true
+fi
+
+mkdir -p "$ROOTFS/etc/deposit"
+cat > "$ROOTFS/etc/deposit/andromeda.ascii" <<'ASCII'
+                 ✦            ·
+        .·░▒▓█████████▓▒░·.
+    ··▒▓██████████████████▓▒··
+   ▐█████▌ ▓▓▓▓▓▓▓▓▓ ▐█████▌
+    ··▒▓████ ▀▀▀▀▀ █████▓▒··
+        '·░▒▓███████▓▒·'
+              ✦      Deposit OS
+ASCII
+BASHRC_HOOK='
+# Deposit OS: galaxy greeting on interactive shells
+if [[ $- == *i* ]] && command -v fastfetch >/dev/null 2>&1 && [[ -z $FASTFETCH_RAN ]]; then
+  export FASTFETCH_RAN=1
+  fastfetch --logo /etc/deposit/andromeda.ascii 2>/dev/null || true
+fi'
+grep -q "FASTFETCH_RAN" "$ROOTFS/etc/skel/.bashrc" 2>/dev/null || \
+  printf '%s\n' "$BASHRC_HOOK" >> "$ROOTFS/etc/skel/.bashrc"
+if [[ -f "$ROOTFS/home/$DEPOSIT_DEFAULT_USER/.bashrc" ]] && ! grep -q FASTFETCH_RAN "$ROOTFS/home/$DEPOSIT_DEFAULT_USER/.bashrc"; then
+  printf '%s\n' "$BASHRC_HOOK" >> "$ROOTFS/home/$DEPOSIT_DEFAULT_USER/.bashrc"
 fi
 
 # --- Windows-style mode templates (Beta 0.1.0.8, deposit-winmode) -----------

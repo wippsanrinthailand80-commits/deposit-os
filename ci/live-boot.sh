@@ -367,6 +367,26 @@ harvest_probes
 pick_brightest /tmp/shots/guest-desktop.png /tmp/shots/live-1.png /tmp/shots/live-2.png \
   || [ -s /tmp/shots/live-2.png ] && cp /tmp/shots/live-2.png /tmp/shots/guest-desktop.png
 [ -s /tmp/shots/live-5.png ] && cp /tmp/shots/live-5.png /tmp/shots/thai-web.png
+
+# GUARDRAIL: never declare success on a black screen again (the runs
+# #104-#118 wallpaper saga). Heroes must carry real content.
+python3 - <<'PYG'
+import sys
+from PIL import Image, ImageStat
+fails = []
+for name, floor in (("guest-desktop.png", 20), ("thai-web.png", 20)):
+    p = f"/tmp/shots/{name}"
+    try:
+        a = ImageStat.Stat(Image.open(p).convert("L")).mean[0]
+    except Exception as e:
+        fails.append(f"{name}: unreadable ({e})"); continue
+    print(f"[guardrail] {name} brightness {a:.1f} (floor {floor})")
+    if a < floor:
+        fails.append(f"{name}: too dark ({a:.1f})")
+if fails:
+    sys.exit("GUARDRAIL FAILED -> " + "; ".join(fails))
+PYG
+
 [ -s /tmp/deposit-metrics.txt ] && { echo "---- idle metrics ----"; cat /tmp/deposit-metrics.txt; } \
   || echo "[live] no metrics (see warnings above)"
 echo "[live] done"

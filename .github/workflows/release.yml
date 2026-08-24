@@ -1,0 +1,66 @@
+# Release automation: pushing a tag (v*) waits for the CI run of that exact
+# commit to finish green, then publishes its artifacts to a GitHub Release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: publish release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: wait for CI of this tag's commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RID=""
+          for i in $(seq 1 90); do
+            RID=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" \
+                    --json databaseId --jq '.[0].databaseId // empty')
+            if [ -n "$RID" ]; then
+              ST=$(gh run view "$RID" --json status,conclusion \
+                     --jq '.status + " " + .conclusion')
+              echo "ci run $RID: $ST"
+              case "$ST" in
+                *" success") echo "RID=$RID" >> "$GITHUB_ENV"; exit 0 ;;
+                *" failure"*|*" cancelled"*|*" startup_failure"*) exit 1 ;;
+              esac
+            else
+              echo "waiting for CI run to appear..."
+            fi
+            sleep 60
+          done
+          echo "CI did not go green within 90 minutes" >&2; exit 1
+
+      - name: collect artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rel
+          gh run download "$RID" -D dl
+          cp "dl/deposit-os.iso/"*            rel/ 2>/dev/null || true
+          cp "dl/deposit-os-live-autologin.iso/"* rel/ 2>/dev/null || true
+          cp dl/nvidia-driver-beta/*          rel/ 2>/dev/null || true
+          ( cd rel && sha256sum * > SHA256SUMS.txt ) || true
+          ls -la rel
+
+      - name: create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rel/*
+          body: |
+            Automated Deposit OS release.
+
+            - `deposit-os-live-autologin.iso` — live demo image (autologin)
+            - `deposit-os.iso` — live image with login screen
+            - `nvidia-beta.mlpds` — NVIDIA beta driver package (`aqa install nvidia-beta.mlpds`)
+
+            Verify checksums against `SHA256SUMS.txt`.
