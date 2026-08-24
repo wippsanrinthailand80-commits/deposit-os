@@ -66,7 +66,7 @@ DEPOSIT_EXTRA_BASE="${DEPOSIT_EXTRA_BASE:-apt-utils ca-certificates gpgv \
 # whiskermenu = the "Start" button for Windows-style mode (deposit-winmode).
 DEPOSIT_DESKTOP_PKGS="${DEPOSIT_DESKTOP_PKGS:-xfce4 xfce4-terminal lightdm lightdm-gtk-greeter xfce4-goodies xorg xserver-xorg-video-all xserver-xorg-input-all xfce4-whiskermenu-plugin \
   breeze-gtk-theme breeze-cursor-theme accountsservice firefox fonts-thai-tlwg xdotool \
-  librsvg2-common fastfetch}"
+  librsvg2-common neofetch}"
 
 # Packages needed ON THE LIVE SYSTEM to run the disk installer offline.
 DEPOSIT_INSTALLER_PKGS="${DEPOSIT_INSTALLER_PKGS:-whiptail xterm rsync dosfstools \

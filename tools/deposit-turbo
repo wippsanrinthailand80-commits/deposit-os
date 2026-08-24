@@ -50,25 +50,29 @@ cpu_set(){
 }
 
 gpu_set(){
-  local mode="$1" f
+  local mode="$1" f applied=0
   # AMD: /sys/class/drm/card*/device/power_dpm_force_performance_level
   for f in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
-    [[ -w "$f" ]] && echo "$mode" > "$f" 2>/dev/null || true
+    if [[ -w "$f" ]]; then echo "$mode" > "$f" 2>/dev/null && applied=1; fi
   done
   # NVIDIA: PowerMizer (1=max performance, 0=auto)
   if command -v nvidia-settings >/dev/null 2>&1; then
     case "$mode" in
-      high) nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=1' >/dev/null 2>&1 || true ;;
+      high) nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=1' >/dev/null 2>&1 && applied=1 ;;
       auto) nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=0' >/dev/null 2>&1 || true ;;
     esac
   fi
+  # report whether ANY GPU profile was really applied (the FX overlay spins
+  # ONLY when this is 1 — otherwise it shows a static badge instead of a
+  # misleading loading spinner on machines with no controllable GPU).
+  echo "$applied" > "$STATE_DIR/gpu"
 }
 
 on(){
   cpu_set performance 0
   gpu_set high
   write_state on
-  log "ON  (CPU=performance, GPU=high)"
+  log "ON  (CPU=performance, GPU=$([[ $(cat "$STATE_DIR/gpu" 2>/dev/null) == 1 ]] && echo high || echo n/a))"
 }
 
 off(){

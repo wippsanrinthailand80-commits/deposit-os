@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Deposit OS Turbo transition FX — a small centered overlay that reacts to
-Turbo mode (deposit-turbo). Test version.
+Turbo mode (deposit-turbo).
 
-Behaviour (per spec):
-  * Turbo ON  -> a spinner fades in, spins, then gradually fades away.
-  * Turbo OFF -> it reappears, but does NOT spin (static), then slowly fades.
-State is read from /var/lib/deposit-turbo/state ("on"/"off").
+Behaviour:
+  * Turbo ON, GPU profile applied -> spinner spins while boosting shows,
+    then the badge gradually fades away.
+  * Turbo ON, no controllable GPU (VMs etc.)  -> STATIC badge (no spinner:
+    nothing is actually working, so pretending to load was misleading).
+  * Turbo OFF -> static grey badge, then fades away.
+
+Robustness (fixes for the "frozen on screen" bug):
+  * every GLib callback is wrapped — an exception can no longer silently
+    remove the timeout source and leave the window visible forever
+  * a kill-switch timer force-hides the overlay 6 s after every show, so
+    even if the whole fade machinery dies the UI can never stick around
 """
 import time
 import gi
@@ -14,6 +22,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
 
 STATE_FILE = "/var/lib/deposit-turbo/state"
+GPU_FILE = "/var/lib/deposit-turbo/gpu"
 
 
 def read_state():
@@ -21,6 +30,13 @@ def read_state():
         return open(STATE_FILE).read().strip()
     except Exception:
         return "off"
+
+
+def gpu_applied():
+    try:
+        return open(GPU_FILE).read().strip() == "1"
+    except Exception:
+        return False
 
 
 class TurboFX(Gtk.Window):
@@ -42,7 +58,7 @@ class TurboFX(Gtk.Window):
         Gtk.StyleContext.add_provider_for_screen(
             self.get_screen(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.set_border_width(26)
         box.set_halign(Gtk.Align.CENTER)
         box.set_valign(Gtk.Align.CENTER)
@@ -52,24 +68,41 @@ class TurboFX(Gtk.Window):
         self.lbl = Gtk.Label()
         self.lbl.set_markup('<b><span size="large" foreground="#ffffff">TURBO</span></b>')
         box.pack_start(self.lbl, False, False, 0)
+        self.sub = Gtk.Label()
+        self.sub.set_markup('<span size="small" foreground="#9aa0b5"> </span>')
+        box.pack_start(self.sub, False, False, 0)
         self.add(box)
 
         self.set_opacity(0)
         self.last = read_state()
         self._fade_src = None
         self._delay_src = None
+        self._kill_src = None
         self.connect("destroy", Gtk.main_quit)
         self.show_all()
         self.spin.stop()
 
-        GLib.timeout_add(400, self._poll)
+        GLib.timeout_add(400, self.safe(self._poll))
 
-    # -- animation helpers --------------------------------------------------
+    # -- safety wrapper: a raising callback must never kill its own source ---
+    def safe(self, fn):
+        def wrapped(*a):
+            try:
+                return fn(*a)
+            except Exception as e:
+                print("deposit-turbo-fx:", e)
+                return False
+        return wrapped
+
+    # -- animation helpers ---------------------------------------------------
     def _cancel(self):
         for attr in ("_fade_src", "_delay_src"):
             src = getattr(self, attr, None)
             if src:
-                GLib.source_remove(src)
+                try:
+                    GLib.source_remove(src)
+                except Exception:
+                    pass
                 setattr(self, attr, None)
 
     def _fade(self, target, dur_ms, after=None):
@@ -78,7 +111,7 @@ class TurboFX(Gtk.Window):
         t0 = time.time()
 
         def tick():
-            frac = min(1, (time.time() - t0) * 1000 / dur_ms)
+            frac = min(1.0, (time.time() - t0) * 1000 / dur_ms)
             self.set_opacity(start + (target - start) * frac)
             if frac >= 1:
                 self._fade_src = None
@@ -87,38 +120,60 @@ class TurboFX(Gtk.Window):
                 return False
             return True
 
-        self._fade_src = GLib.timeout_add(30, tick)
+        self._fade_src = GLib.timeout_add(30, self.safe(tick))
 
-    def _show(self):
-        self.show_all()
+    def _arm_kill_switch(self):
+        """Absolute guarantee the overlay cannot freeze on screen."""
+        if self._kill_src:
+            try:
+                GLib.source_remove(self._kill_src)
+            except Exception:
+                pass
+        self._kill_src = GLib.timeout_add(6000, self.safe(self._force_hide))
 
-    def _hide(self):
-        self.hide()
+    def _force_hide(self):
+        try:
+            self.spin.stop()
+            self.hide()
+            self.set_opacity(0)
+        finally:
+            self._kill_src = None
+        return False
 
-    # -- transitions ---------------------------------------------------------
+    # -- transitions ----------------------------------------------------------
     def _on(self):
         self._cancel()
-        self.spin.start()
+        boost = gpu_applied()
+        if boost:
+            self.spin.start()          # something IS happening: spin honestly
+        else:
+            self.spin.stop()           # no controllable GPU: never fake-load
         self.lbl.set_markup('<b><span size="large" foreground="#ffffff">TURBO</span></b>')
+        self.sub.set_markup('<span size="small" foreground="#ffb45e">GPU boost</span>'
+                            if boost else
+                            '<span size="small" foreground="#9aa0b5">CPU boost</span>')
         self.set_opacity(0)
-        self._show()
+        self.show_all()
+        self._arm_kill_switch()
         self._fade(1, 350)
-        self._delay_src = GLib.timeout_add(2200, self._fade_out)
+        self._delay_src = GLib.timeout_add(2200, self.safe(self._fade_out))
 
     def _off(self):
         self._cancel()
-        self.spin.stop()  # static: not spinning
+        self.spin.stop()               # static: not spinning
         self.lbl.set_markup('<b><span size="large" foreground="#9aa0b5">TURBO OFF</span></b>')
+        self.sub.set_markup('<span size="small" foreground="#9aa0b5">normal mode</span>')
         self.set_opacity(0)
-        self._show()
+        self.show_all()
+        self._arm_kill_switch()
         self._fade(1, 350)
-        self._delay_src = GLib.timeout_add(1600, self._fade_out)
+        self._delay_src = GLib.timeout_add(1600, self.safe(self._fade_out))
 
     def _fade_out(self):
         self.spin.stop()
-        self._fade(0, 450, after=self._hide)
+        self._fade(0, 450, after=self.safe(lambda: (self.hide(), None)[1]))
 
-    # -- state watcher -------------------------------------------------------
+    # -- state watcher ---------------------------------------------------------
     def _poll(self):
         s = read_state()
         if s != self.last:

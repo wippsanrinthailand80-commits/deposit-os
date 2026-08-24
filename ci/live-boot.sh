@@ -198,6 +198,15 @@ sleep 150
     xfconf-query -c xfce4-desktop -l -v 2>&1 | grep -iE "last-image|image-style" || echo none
   echo "-- full user channel xml --"
   cat /home/deposit/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null
+  echo "-- turbo fx smoke (user-reported freeze fix) --"
+  pgrep -a -f deposit-turbo-fx >/dev/null || echo "WARN: turbo-fx NOT running"
+  deposit-turbo on >/dev/null 2>&1
+  sleep 1
+  echo "state=$(cat /var/lib/deposit-turbo/state 2>/dev/null) gpu_applied=$(cat /var/lib/deposit-turbo/gpu 2>/dev/null)"
+  pgrep -a -f deposit-turbo-fx >/dev/null && echo "fx alive after ON transition" || echo "FAIL: fx died"
+  deposit-turbo off >/dev/null 2>&1
+  sleep 6
+  pgrep -a -f deposit-turbo-fx >/dev/null && echo "fx still alive (kill-switch window passed)" || echo "FAIL: fx died"
   echo "-- wallpaper assets + enforcer --"
   ls -la /usr/share/backgrounds/deposit/ 2>&1
   file /usr/share/backgrounds/deposit/*.jpg 2>&1

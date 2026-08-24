@@ -896,6 +896,23 @@ if [[ -f "$SP_PLY/spinner.plymouth" ]]; then
 fi
 
 mkdir -p "$ROOTFS/etc/deposit"
+# XFWM4 built-in compositor ON by default: without a compositing manager,
+# GTK window opacity is a silent no-op on X11 — the Turbo FX badge could
+# never fade, it just sat there fully opaque ("frozen"). This makes every
+# fade in the session real.
+mkdir -p "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml" \
+         "$ROOTFS/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml"
+for DEST in "$ROOTFS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml" \
+            "$ROOTFS/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml"; do
+  cat > "$DEST" <<XFC
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="use_compositor" type="bool" value="true"/>
+  </property>
+</channel>
+XFC
+done
 cat > "$ROOTFS/etc/deposit/andromeda.ascii" <<'ASCII'
                  ✦            ·
         .·░▒▓█████████▓▒░·.
@@ -907,9 +924,9 @@ cat > "$ROOTFS/etc/deposit/andromeda.ascii" <<'ASCII'
 ASCII
 BASHRC_HOOK='
 # Deposit OS: galaxy greeting on interactive shells
-if [[ $- == *i* ]] && command -v fastfetch >/dev/null 2>&1 && [[ -z $FASTFETCH_RAN ]]; then
+if [[ $- == *i* ]] && command -v neofetch >/dev/null 2>&1 && [[ -z $FASTFETCH_RAN ]]; then
   export FASTFETCH_RAN=1
-  fastfetch --logo /etc/deposit/andromeda.ascii 2>/dev/null || true
+  neofetch --ascii /etc/deposit/andromeda.ascii 2>/dev/null || true
 fi'
 grep -q "FASTFETCH_RAN" "$ROOTFS/etc/skel/.bashrc" 2>/dev/null || \
   printf '%s\n' "$BASHRC_HOOK" >> "$ROOTFS/etc/skel/.bashrc"
