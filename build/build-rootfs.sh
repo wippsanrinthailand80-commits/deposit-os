@@ -714,7 +714,7 @@ if command -v convert >/dev/null 2>&1 && [[ -f "$LOGO_SRC" ]]; then
   if convert "$LOGO_SRC" "$ROOTFS/.logo-alpha.png" -alpha off \
        -compose CopyOpacity -composite -colorspace sRGB -type TrueColorAlpha \
        -trim +repage -resize 512x512 \
-       -background none -gravity center -extent 512x512 "$LOGO_PNG"; then
+       -background none -gravity center -extent 512x512 "PNG32:$LOGO_PNG"; then
     echo "[rootfs] Andromeda photo cutout logo: $(du -h "$LOGO_PNG" | cut -f1)"
   fi
   rm -f "$ROOTFS/.logo-alpha.png"

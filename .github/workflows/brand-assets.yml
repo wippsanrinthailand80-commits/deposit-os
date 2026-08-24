@@ -23,7 +23,7 @@ jobs:
                   -alpha off -compose CopyOpacity -composite -colorspace sRGB -type TrueColorAlpha \
                   -trim +repage -resize 512x512 \
                   -background none -gravity center -extent 512x512 \
-                  deposit-logo.png
+                  PNG32:deposit-logo.png
           identify deposit-logo.png
       - uses: actions/upload-artifact@v4
         with:
