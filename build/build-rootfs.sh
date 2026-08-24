@@ -712,7 +712,8 @@ LOGO_PNG="$ROOTFS/usr/share/pixmaps/deposit-logo.png"
 if command -v convert >/dev/null 2>&1 && [[ -f "$LOGO_SRC" ]]; then
   convert "$LOGO_SRC" -colorspace gray -level 2%,45% "$ROOTFS/.logo-alpha.png"
   if convert "$LOGO_SRC" "$ROOTFS/.logo-alpha.png" -alpha off \
-       -compose CopyOpacity -composite -trim +repage -resize 512x512 \
+       -compose CopyOpacity -composite -colorspace sRGB -type TrueColorAlpha \
+       -trim +repage -resize 512x512 \
        -background none -gravity center -extent 512x512 "$LOGO_PNG"; then
     echo "[rootfs] Andromeda photo cutout logo: $(du -h "$LOGO_PNG" | cut -f1)"
   fi

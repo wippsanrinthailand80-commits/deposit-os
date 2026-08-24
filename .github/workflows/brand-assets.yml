@@ -20,7 +20,7 @@ jobs:
           convert assets/wallpaper-andromeda-galaxy.jpg \
                   -colorspace gray -level 2%,45% /tmp/alpha.png
           convert assets/wallpaper-andromeda-galaxy.jpg /tmp/alpha.png \
-                  -alpha off -compose CopyOpacity -composite \
+                  -alpha off -compose CopyOpacity -composite -colorspace sRGB -type TrueColorAlpha \
                   -trim +repage -resize 512x512 \
                   -background none -gravity center -extent 512x512 \
                   deposit-logo.png
