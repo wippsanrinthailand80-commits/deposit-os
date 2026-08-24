@@ -192,11 +192,16 @@ sleep 150
   echo "-- greeter/desktop log tail --"
   journalctl -u lightdm -b --no-pager 2>/dev/null | tail -10
   echo "-- backdrop proof (user xfconf after autostart enforcer) --"
-  grep -h "last-image\|image-style" \
-    /home/deposit/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null \
-    || echo "no user xfconf backdrop written yet"
+  echo "-- resolved property list --"
+  runuser -u deposit -- env DISPLAY=:0 \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u deposit)/bus" \
+    xfconf-query -c xfce4-desktop -l -v 2>&1 | grep -iE "last-image|image-style" || echo none
+  echo "-- full user channel xml --"
+  cat /home/deposit/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null
   echo "-- wallpaper assets + enforcer --"
   ls -la /usr/share/backgrounds/deposit/ 2>&1
+  file /usr/share/backgrounds/deposit/*.jpg 2>&1
+  ls /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders/ 2>&1
   ls -la /usr/local/sbin/deposit-set-wallpaper.sh /etc/xdg/autostart/deposit-wallpaper.desktop 2>&1
   pgrep -a -f "xfconfd|xfdesktop|deposit-set-wallpaper" || true
 } > /var/log/deposit-gfxdiag.txt 2>&1

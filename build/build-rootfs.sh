@@ -768,10 +768,20 @@ set_style(){ xfconf-query -c xfce4-desktop -p "$1" -t int -s 5 --create >/dev/nu
 MONS="$(xrandr --query 2>/dev/null | awk '/ connected/{print $1}')"
 [ -z "$MONS" ] && MONS="Virtual-1 monitor0"
 for M in $MONS monitor0; do
-  set_bg "/backdrop/screen0/$M/workspace0/last-image" "$IMG_DESK"
-  set_style "/backdrop/screen0/$M/workspace0/image-style"
+  for W in workspace0 workspace1 workspace2 workspace3; do
+    set_bg "/backdrop/screen0/$M/$W/last-image" "$IMG_DESK"
+    set_style "/backdrop/screen0/$M/$W/image-style"
+  done
   set_bg "/backdrop/screen0/$M/last-image" "$IMG_DESK"
   set_style "/backdrop/screen0/$M/image-style"
+done
+# nuke any stale default-wallpaper entries so nothing shadows ours
+xfconf-query -c xfce4-desktop -p /backdrop -r -R >/dev/null 2>&1 || true
+for M in $MONS monitor0; do
+  for W in workspace0 workspace1 workspace2 workspace3; do
+    set_bg "/backdrop/screen0/$M/$W/last-image" "$IMG_DESK"
+    set_style "/backdrop/screen0/$M/$W/image-style"
+  done
 done
 sleep 2
 pkill -HUP xfdesktop 2>/dev/null || true
