@@ -707,17 +707,15 @@ cp "$REPO_ROOT/assets/logo.svg"               "$ROOTFS/usr/share/icons/hicolor/s
 # (Adam Evans, CC BY 2.0) — black space turns transparent, the faint outer
 # disc fades smoothly, leaving galaxy + companions. Needs ImageMagick, so it
 # is generated here at build time; the vector SVG remains as fallback.
-LOGO_SRC="$REPO_ROOT/assets/wallpaper-andromeda-galaxy.jpg"
 LOGO_PNG="$ROOTFS/usr/share/pixmaps/deposit-logo.png"
-if command -v convert >/dev/null 2>&1 && [[ -f "$LOGO_SRC" ]]; then
-  convert "$LOGO_SRC" -colorspace gray -level 2%,45% "$ROOTFS/.logo-alpha.png"
-  if convert "$LOGO_SRC" "$ROOTFS/.logo-alpha.png" -alpha off \
-       -compose CopyOpacity -composite -colorspace sRGB -type TrueColorAlpha \
-       -trim +repage -resize 512x512 \
-       -background none -gravity center -extent 512x512 "PNG32:$LOGO_PNG"; then
-    echo "[rootfs] Andromeda photo cutout logo: $(du -h "$LOGO_PNG" | cut -f1)"
-  fi
-  rm -f "$ROOTFS/.logo-alpha.png"
+# Single source of truth: ci/make-logo.py (PIL cutout — IM6 kept collapsing
+# the result to gray or a black silhouette; see runs #121-#123).
+if python3 "$REPO_ROOT/ci/make-logo.py"; then
+  mkdir -p "$(dirname "$LOGO_PNG")"
+  cp deposit-logo.png "$LOGO_PNG"
+  echo "[rootfs] Andromeda photo cutout logo: $(du -h "$LOGO_PNG" | cut -f1)"
+else
+  echo "[rootfs] WARN: logo generation failed (svg fallback stays)"
 fi
 if [[ -f "$LOGO_PNG" ]]; then
   mkdir -p "$ROOTFS/usr/share/icons/hicolor/512x512/apps"

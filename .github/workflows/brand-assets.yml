@@ -13,18 +13,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: install imagemagick
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends imagemagick
       - name: cut the galaxy out of the photo
         run: |
-          convert assets/wallpaper-andromeda-galaxy.jpg \
-                  -colorspace gray -level 2%,45% /tmp/alpha.png
-          convert assets/wallpaper-andromeda-galaxy.jpg /tmp/alpha.png \
-                  -alpha off -compose CopyOpacity -composite -colorspace sRGB -type TrueColorAlpha \
-                  -trim +repage -resize 512x512 \
-                  -background none -gravity center -extent 512x512 \
-                  PNG32:deposit-logo.png
-          identify deposit-logo.png
+          pip3 install --quiet pillow || pip3 install --quiet --break-system-packages pillow || true
+          python3 ci/make-logo.py
       - uses: actions/upload-artifact@v4
         with:
           name: deposit-logo
