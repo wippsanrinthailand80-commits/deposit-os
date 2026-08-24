@@ -60,25 +60,52 @@ done
 [[ -n "$MODS" ]] || { tail -30 /tmp/nvidia-kbuild.log; fail "no modules produced"; }
 log "built modules:$MODS"
 
-# --- 2. Userspace from Ubuntu multiverse (unmodified debs) -------------------
+# --- 2. Userspace from Ubuntu pool (direct downloads) -------------------------
+# NOTE: run #116 proved runner-side `apt-get download` silently returns exit 0
+# while producing doc-only stubs for these names — so we resolve real pool
+# filenames ourselves from the Packages indexes and curl them directly.
 log "fetching Ubuntu userspace packages (series $UBU_SERIES)"
-# NOTE: libnvidia-firmware-<series> only exists for newer series (555+);
-# noble's 550 set has no firmware package (run #110).
 PKGS="libnvidia-common-$UBU_SERIES libnvidia-compute-$UBU_SERIES \
       libnvidia-cfg1-$UBU_SERIES libnvidia-gl-$UBU_SERIES \
       libnvidia-encode-$UBU_SERIES libnvidia-decode-$UBU_SERIES \
       nvidia-utils-$UBU_SERIES xserver-xorg-video-nvidia-$UBU_SERIES"
 DL="$(mktemp -d)"
-for p in $PKGS; do
-  ( cd "$DL" && apt-get download "$p" ) >> /tmp/nvidia-dl.log 2>&1 \
-    || log "WARN: no deb for $p in this series (skipped)"
-done
-ls -A "$DL" | grep -q ".deb" || { tail -20 /tmp/nvidia-dl.log; fail "no userspace debs downloaded"; }
-
-# --- 3. Assemble payload (absolute-layout tree) -----------------------------
 PAYLOAD="$DL/payload"
 mkdir -p "$PAYLOAD"
+BASE="http://azure.archive.ubuntu.com/ubuntu"
+python3 - "$BASE" $PKGS > "$DL/urls.txt" <<'PYEOF'
+import gzip, sys, urllib.request
+base, want = sys.argv[1], set(sys.argv[2:])
+found = {}
+for comp in ("restricted", "multiverse", "universe", "main"):
+    try:
+        raw = urllib.request.urlopen(
+            f"{base}/dists/noble/{comp}/binary-amd64/Packages.gz", timeout=180).read()
+        data = gzip.decompress(raw).decode("utf8", "replace")
+    except Exception:
+        continue
+    for para in data.split("\n\n"):
+        lines = para.splitlines()
+        if lines and lines[0].startswith("Package: "):
+            name = lines[0][9:]
+            if name in want and name not in found:
+                kv = dict(l.split(": ", 1) for l in lines if ": " in l)
+                found[name] = kv["Filename"]
+for p in sorted(want):
+    fn = found.get(p)
+    print(p, base + "/" + fn if fn else "-")
+PYEOF
+while read -r p url; do
+  if [ "$url" != "-" ] && curl -sSL --retry 3 --max-time 900 -o "$DL/$p.deb" "$url"; then
+    log "fetched $p ($(du -h "$DL/$p.deb" | cut -f1))"
+  else
+    log "WARN: no pool deb for $p (skipped)"
+  fi
+done < "$DL/urls.txt"
+ls "$DL"/*.deb >/dev/null 2>&1 || { tail -5 "$DL/urls.txt"; fail "no userspace debs fetched"; }
 for d in "$DL"/*.deb; do dpkg -x "$d" "$PAYLOAD"; done
+ls "$PAYLOAD"/usr/lib/x86_64-linux-gnu/libnvidia-glcore.so.* >/dev/null 2>&1 \
+  || fail "userspace GL libs missing after extraction (pool download broken)"
 mkdir -p "$PAYLOAD/lib/modules/$KREL/updates/drm"
 for f in $MODS; do
   install -m 0644 "$f" "$PAYLOAD/lib/modules/$KREL/updates/drm/"
