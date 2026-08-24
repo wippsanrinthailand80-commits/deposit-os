@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="160" alt="Deposit OS — the Andromeda Galaxy">
+</p>
+
 # Deposit OS
 
 **A Linux distribution built from the kernel up** — we compile our own Linux
